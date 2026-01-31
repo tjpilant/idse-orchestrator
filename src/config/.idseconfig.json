@@ -1,0 +1,7 @@
+{
+  "agency_url": "http://localhost:8000",
+  "client_id": null,
+  "templates_dir": null,
+  "sync_on_validate": false,
+  "auto_detect_stages": true
+}

@@ -1,0 +1,3 @@
+[submodule "src/idse_orchestrator/resources/frameworks/agency-swarm"]
+	path = src/idse_orchestrator/resources/frameworks/agency-swarm
+	url = https://github.com/agency-ai-solutions/agency-starter-template.git

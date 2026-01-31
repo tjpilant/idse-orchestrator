@@ -1,0 +1,9 @@
+recursive-include src/idse_orchestrator/resources/docs *.md
+recursive-include src/idse_orchestrator/resources/templates *.md
+recursive-include src/idse_orchestrator/resources/frameworks *.mdc
+recursive-include src/idse_orchestrator/resources/frameworks *.*
+recursive-include src/idse_orchestrator/config *.json
+recursive-include src/idse_orchestrator/templates/agent_instructions *.*
+recursive-include src/idse_orchestrator/resources/frameworks/agency-swarm/.cursor/commands *.md
+recursive-include src/idse_orchestrator/resources/frameworks/agency-swarm/.claude *.*
+recursive-include src/idse_orchestrator/governance *.md

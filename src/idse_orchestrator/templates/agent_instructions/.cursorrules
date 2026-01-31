@@ -1,0 +1,40 @@
+# IDSE Pipeline Awareness for {project_name}
+
+This project uses IDSE (Intent-Driven Systems Engineering).
+
+## Pre-Code Checklist
+
+Before generating ANY code:
+1. Check if `.idse/` directory exists
+2. Read current session: `cat .idse/projects/{project_name}/CURRENT_SESSION`
+3. Read pipeline documents in THIS ORDER:
+   - intents/intent.md (WHAT and WHY)
+   - contexts/context.md (Constraints and requirements)
+   - specs/spec.md (Technical specifications)
+   - plans/plan.md (Implementation strategy)
+   - tasks/tasks.md (Specific tasks to complete)
+
+## Code Generation Rules
+
+- Your code MUST align with these documents
+- Follow the plan exactly as written
+- Don't add features not in the spec
+- Don't deviate from the implementation strategy
+
+## Post-Code Documentation
+
+After coding:
+- Update `implementation/README.md` with what you built
+- Add lessons learned to `feedback/feedback.md`
+- Update `tasks.md` to mark completed tasks
+
+## Commands
+
+Check status: `idse status --project {project_name}`
+Validate: `idse validate --project {project_name}`
+Sync: `idse sync push --project {project_name}`
+
+## Project Info
+
+Stack: {stack}
+IDSE Version: 0.1.0

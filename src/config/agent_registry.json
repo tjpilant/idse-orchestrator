@@ -1,0 +1,25 @@
+{
+  "agents": [
+    {
+      "id": "claude-code",
+      "name": "Claude Code",
+      "role": "orchestrator",
+      "stages": ["intent", "context", "spec", "plan", "tasks"],
+      "description": "Claude Code handles planning and specification stages"
+    },
+    {
+      "id": "gpt-codex",
+      "name": "GPT Codex",
+      "role": "implementer",
+      "stages": ["implementation"],
+      "description": "GPT Codex handles code implementation tasks"
+    },
+    {
+      "id": "test-agent",
+      "name": "Test Agent",
+      "role": "validator",
+      "stages": ["feedback"],
+      "description": "Validates implementation and provides feedback"
+    }
+  ]
+}

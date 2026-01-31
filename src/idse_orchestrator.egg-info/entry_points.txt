@@ -1,0 +1,2 @@
+[console_scripts]
+idse = idse_orchestrator.cli:main
