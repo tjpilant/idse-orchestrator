@@ -3,15 +3,14 @@ IDSE Developer Orchestrator
 
 A pip-installable CLI package for managing Intent-Driven Systems Engineering (IDSE)
 projects in client workspaces. This orchestrator coordinates IDE agents (Claude Code,
-GPT Codex) and syncs pipeline artifacts with the Agency Core backend.
+GPT Codex) and manages pipeline artifacts locally.
 
 Architecture:
-- Layer 2 in the three-layer IDSE ecosystem
-- Installed per client workspace via pip
+- Standalone per-workspace tool, installed via pip
 - Generates pipeline docs from templates
 - Tracks session state and stage progress
 - Coordinates agent routing across IDE agents when configured
-- Syncs with Agency Core via MCP protocol
+- CMS-agnostic storage via DesignStore abstraction
 """
 
 __version__ = "0.1.0"

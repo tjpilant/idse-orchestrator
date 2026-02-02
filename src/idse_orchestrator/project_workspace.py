@@ -31,7 +31,7 @@ class ProjectWorkspace:
         self,
         project_name: str,
         stack: str,
-        client_id: Optional[str] = None,
+        owner: Optional[str] = None,
         create_agent_files: bool = True,
         is_blueprint: bool = True,
     ) -> Path:
@@ -41,7 +41,7 @@ class ProjectWorkspace:
         Args:
             project_name: Name of the project
             stack: Technology stack (python, node, go, etc.)
-            client_id: Optional client ID from Agency Core
+            owner: Optional owner identifier
             create_agent_files: If True, creates CLAUDE.md, AGENTS.md, .cursorrules in repo root
             is_blueprint: If True, creates a blueprint session; otherwise creates a feature session
 
@@ -104,9 +104,9 @@ class ProjectWorkspace:
         # Create .owner metadata file (for backward compatibility)
         owner_file = session_path / "metadata" / ".owner"
         owner_file.write_text(f"Created: {datetime.now().isoformat()}\n")
-        if client_id:
+        if owner:
             with owner_file.open("a") as f:
-                f.write(f"Client ID: {client_id}\n")
+                f.write(f"Owner: {owner}\n")
 
         # Create session.json metadata
         from .session_metadata import SessionMetadata
@@ -119,7 +119,7 @@ class ProjectWorkspace:
             is_blueprint=is_blueprint,
             parent_session=None if is_blueprint else "__blueprint__",
             related_sessions=[],
-            owner=client_id or "system",
+            owner=owner or "system",
             collaborators=[],
             tags=[],
             status="draft",
@@ -197,47 +197,6 @@ class ProjectWorkspace:
             current = current.parent
 
         return None
-
-    def get_project_uuid(self, project_name: str) -> Optional[str]:
-        """Get cached project UUID from project metadata."""
-        project_path = self.projects_root / project_name
-        metadata_file = project_path / "metadata" / "project.json"
-
-        if not metadata_file.exists():
-            return None
-
-        try:
-            metadata = json.loads(metadata_file.read_text())
-            return metadata.get("project_uuid")
-        except (json.JSONDecodeError, KeyError):
-            return None
-
-    def set_project_uuid(self, project_name: str, project_uuid: str) -> None:
-        """Cache project UUID in project metadata."""
-        project_path = self.projects_root / project_name
-        metadata_dir = project_path / "metadata"
-        metadata_file = metadata_dir / "project.json"
-
-        metadata_dir.mkdir(parents=True, exist_ok=True)
-
-        if metadata_file.exists():
-            try:
-                metadata = json.loads(metadata_file.read_text())
-            except json.JSONDecodeError:
-                metadata = {}
-        else:
-            metadata = {}
-
-        metadata.update({
-            "project_name": project_name,
-            "project_uuid": project_uuid,
-            "last_synced": datetime.now().isoformat(),
-        })
-
-        if "created_at" not in metadata:
-            metadata["created_at"] = datetime.now().isoformat()
-
-        metadata_file.write_text(json.dumps(metadata, indent=2))
 
     def _create_agent_instructions(self, project_name: str, stack: str) -> None:
         """

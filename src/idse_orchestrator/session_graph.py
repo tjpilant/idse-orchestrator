@@ -83,7 +83,7 @@ Feedback from Feature Sessions flows upward to inform Blueprint updates.
         session_id: str,
         parent_session: str = "__blueprint__",
         description: Optional[str] = None,
-        client_id: Optional[str] = None,
+        owner: Optional[str] = None,
     ) -> Path:
         session_path = self.project_path / "sessions" / session_id
 
@@ -130,9 +130,9 @@ Feedback from Feature Sessions flows upward to inform Blueprint updates.
 
         owner_file = session_path / "metadata" / ".owner"
         owner_file.write_text(f"Created: {datetime.now().isoformat()}\n")
-        if client_id:
+        if owner:
             with owner_file.open("a") as f:
-                f.write(f"Client ID: {client_id}\n")
+                f.write(f"Owner: {owner}\n")
 
         from .session_metadata import SessionMetadata
 
@@ -144,7 +144,7 @@ Feedback from Feature Sessions flows upward to inform Blueprint updates.
             is_blueprint=False,
             parent_session=parent_session,
             related_sessions=[],
-            owner=client_id or "system",
+            owner=owner or "system",
             collaborators=[],
             tags=[],
             status="draft",

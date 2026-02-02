@@ -6,8 +6,6 @@ Command-line interface for managing IDSE projects in client workspaces.
 Commands:
 - init: Initialize a new IDSE project with pipeline structure
 - validate: Check artifacts for constitutional compliance
-- sync push: Upload pipeline docs to Agency Core
-- sync pull: Download latest artifacts from Agency Core
 - status: Display current project and session status
 """
 
@@ -16,7 +14,6 @@ from pathlib import Path
 from typing import Optional
 from datetime import datetime
 import sys
-import requests
 
 from . import __version__
 
@@ -29,7 +26,7 @@ def main(ctx):
     IDSE Developer Orchestrator
 
     Manage Intent-Driven Systems Engineering projects in your workspace.
-    This CLI coordinates IDE agents and syncs with the Agency Core backend.
+    This CLI coordinates IDE agents and manages pipeline artifacts locally.
     """
     # Ensure context object exists
     ctx.ensure_object(dict)
@@ -44,10 +41,9 @@ def main(ctx):
     type=click.Choice(["agency-swarm", "crew-ai", "autogen"], case_sensitive=False),
     help="Agent framework to integrate (agency-swarm, crew-ai, autogen)",
 )
-@click.option("--client-id", help="Client ID from Agency Core")
 @click.option("--create-agent-files/--no-create-agent-files", default=True, help="Create agent instruction files (CLAUDE.md, AGENTS.md, .cursorrules)")
 @click.pass_context
-def init(ctx, project_name: str, stack: str, guided: bool, agentic: Optional[str], client_id: Optional[str], create_agent_files: bool):
+def init(ctx, project_name: str, stack: str, guided: bool, agentic: Optional[str], create_agent_files: bool):
     """
     Initialize a new IDSE project with blueprint session.
 
@@ -66,7 +62,7 @@ def init(ctx, project_name: str, stack: str, guided: bool, agentic: Optional[str
 
     try:
         manager = ProjectWorkspace()
-        project_path = manager.init_project(project_name, stack, client_id, create_agent_files)
+        project_path = manager.init_project(project_name, stack, create_agent_files=create_agent_files)
 
         # Run guided setup if requested
         if guided:
@@ -116,7 +112,7 @@ def init(ctx, project_name: str, stack: str, guided: bool, agentic: Optional[str
         click.echo(f"Next steps:")
         click.echo(f"  1. Edit blueprint documents in .idse/projects/{project_name}/sessions/__blueprint__/")
         click.echo(f"  2. Run 'idse validate' to check compliance")
-        click.echo(f"  3. Run 'idse sync push' to upload to Agency Core")
+        click.echo(f"  3. Run 'idse status' to view pipeline progress")
 
     except Exception as e:
         click.echo(f"❌ Error: {e}", err=True)
@@ -161,12 +157,6 @@ def validate(ctx, project: Optional[str]):
     except Exception as e:
         click.echo(f"❌ Error: {e}", err=True)
         sys.exit(1)
-
-
-@main.group()
-def sync():
-    """Sync pipeline artifacts with Agency Core."""
-    pass
 
 
 @main.group()
@@ -235,191 +225,6 @@ def compile_agent_spec_cmd(project: Optional[str], session_id: str, blueprint: s
         click.echo(f"❌ Error: {e}", err=True)
         sys.exit(1)
 
-
-@sync.command()
-@click.option("--project", help="Project name (uses current if not specified)")
-@click.option("--agency-url", envvar="IDSE_AGENCY_URL", help="Agency Core URL")
-@click.option("--session", "session_override", help="Session ID to sync (overrides CURRENT_SESSION)")
-@click.pass_context
-def push(ctx, project: Optional[str], agency_url: Optional[str], session_override: Optional[str]):
-    """
-    Upload local pipeline artifacts to Agency Core.
-
-    Validates artifacts locally first, then uploads via MCP protocol.
-    Updates sync timestamp and logs event locally.
-
-    Example:
-        idse sync push
-        idse sync push --project customer-portal
-    """
-    from .agency_sync_engine import AgencySyncEngine
-    from .validation_engine import ValidationEngine
-
-    click.echo("📤 Syncing to Agency Core...")
-
-    # Validate first
-    click.echo("   Validating artifacts...")
-    validator = ValidationEngine()
-    results = validator.validate_project(project)
-
-    if not results["valid"]:
-        click.echo("❌ Validation failed. Fix errors before syncing:", err=True)
-        for error in results["errors"]:
-            click.echo(f"   ✗ {error}", err=True)
-        sys.exit(1)
-
-    try:
-        client = AgencySyncEngine(agency_url)
-        response = client.push_project(project, session_override=session_override)
-
-        click.echo(f"✅ Synced successfully!")
-        click.echo(f"   Project ID: {response.get('project_id')}")
-        if response.get("synced_stages"):
-            click.echo(f"   Stages: {', '.join(response['synced_stages'])}")
-        if response.get("message"):
-            click.echo(f"   Message: {response['message']}")
-        click.echo(f"   Timestamp: {response.get('timestamp')}")
-
-    except Exception as e:
-        click.echo(f"❌ Error: {e}", err=True)
-        sys.exit(1)
-
-
-@sync.command()
-@click.option("--project", help="Project name (uses current if not specified)")
-@click.option("--agency-url", envvar="IDSE_AGENCY_URL", help="Agency Core URL")
-@click.option("--session", "session_override", help="Session ID to pull (uses CURRENT_SESSION if not specified)")
-@click.option("--force", is_flag=True, help="Overwrite local changes without prompting")
-@click.pass_context
-def pull(ctx, project: Optional[str], agency_url: Optional[str], session_override: Optional[str], force: bool):
-    """
-    Download latest pipeline artifacts from Agency Core.
-
-    Pulls artifacts for the specified session (or CURRENT_SESSION if not specified).
-    Compares remote timestamps with local, warns if local changes
-    will be overwritten. Prompts for confirmation unless --force is used.
-
-    Example:
-        idse sync pull
-        idse sync pull --session __blueprint__
-        idse sync pull --force
-    """
-    from .agency_sync_engine import AgencySyncEngine
-
-    click.echo("📥 Pulling from Agency Core...")
-
-    try:
-        client = AgencySyncEngine(agency_url)
-        response = client.pull_project(project, force=force, session_override=session_override)
-
-        session_id = response.get("session_id", "unknown")
-        click.echo(f"   Session: {session_id}")
-
-        if response.get("conflicts") and not force:
-            click.echo("⚠️  Warning: Local changes detected:")
-            for conflict in response["conflicts"]:
-                click.echo(f"   - {conflict}")
-
-            if not click.confirm("Overwrite local changes?"):
-                click.echo("Sync cancelled.")
-                return
-
-        # Proceed with pull
-        client.apply_pull(response)
-
-        artifact_count = len(response.get('artifacts', {}))
-        click.echo("✅ Pull completed successfully!")
-        click.echo(f"   Updated {artifact_count} artifacts for session '{session_id}'")
-
-    except Exception as e:
-        click.echo(f"❌ Error: {e}", err=True)
-        sys.exit(1)
-
-
-@main.group()
-def blueprint():
-    """Manage project blueprints"""
-    pass
-
-
-@blueprint.command("list")
-@click.option("--agency-url", envvar="AGENCY_URL", default="http://127.0.0.1:8000")
-def list_blueprints(agency_url: str):
-    """List available blueprints from Agency Core"""
-    from .agency_sync_engine import AgencySyncEngine
-
-    client = AgencySyncEngine(agency_url)
-    target_url = client.agency_url
-
-    try:
-        response = requests.get(f"{target_url}/sync/blueprints", timeout=30)
-        response.raise_for_status()
-        data = response.json()
-
-        click.echo("\n📘 Available Blueprints:\n")
-        click.echo(f"{'Project Name':<30} {'Progress':<10}")
-        click.echo("-" * 40)
-
-        for bp in data.get("blueprints", []):
-            name = bp["project_name"]
-            progress = bp["progress_percent"]
-            click.echo(f"{name:<30} {progress}%")
-
-    except Exception as e:
-        click.echo(f"❌ Error: {e}", err=True)
-        sys.exit(1)
-
-
-@blueprint.command("install")
-@click.argument("source_project")
-@click.argument("target_project")
-@click.option("--agency-url", envvar="AGENCY_URL", default="http://127.0.0.1:8000")
-def install_blueprint(source_project: str, target_project: str, agency_url: str):
-    """Install blueprint from existing project"""
-    from .agency_sync_engine import AgencySyncEngine
-    from .project_workspace import ProjectWorkspace
-
-    click.echo(f"📥 Installing blueprint from {source_project}...")
-
-    try:
-        client = AgencySyncEngine(agency_url)
-        target_url = client.agency_url
-
-        resp = requests.get(f"{target_url}/sync/blueprints", timeout=30)
-        resp.raise_for_status()
-        blueprints = resp.json().get("blueprints", [])
-
-        source = next((b for b in blueprints if b["project_name"] == source_project), None)
-        if not source:
-            raise ValueError(f"Blueprint '{source_project}' not found")
-
-        artifacts = client.pull_blueprint(source["project_id"])
-
-        manager = ProjectWorkspace()
-        project_path = manager.init_project(target_project, stack="python", client_id=None, create_agent_files=False)
-
-        session_path = project_path / "sessions" / "__blueprint__"
-
-        for artifact_name, content in artifacts.items():
-            file_map = {
-                "intent_md": session_path / "intents" / "intent.md",
-                "context_md": session_path / "contexts" / "context.md",
-                "spec_md": session_path / "specs" / "spec.md",
-                "plan_md": session_path / "plans" / "plan.md",
-                "tasks_md": session_path / "tasks" / "tasks.md",
-                "feedback_md": session_path / "feedback" / "feedback.md",
-                "implementation_md": session_path / "implementation" / "README.md",
-                "implementation_readme_md": session_path / "implementation" / "README.md"
-            }
-
-            if artifact_name in file_map:
-                file_map[artifact_name].write_text(content)
-
-        click.echo(f"✅ Blueprint installed at: {project_path}")
-
-    except Exception as e:
-        click.echo(f"❌ Error: {e}", err=True)
-        sys.exit(1)
 
 
 @main.group()
@@ -622,7 +427,7 @@ def spawn(ctx, plan: str, feature_name: str, project: Optional[str], blueprint: 
             session_id=feature_name,
             parent_session=blueprint,
             description=description,
-            client_id=owner
+            owner=owner
         )
 
         # Update blueprint meta.md
@@ -941,7 +746,6 @@ def status(ctx, project: Optional[str]):
     Shows:
     - Current project and session
     - Stage completion status (pending/in_progress/complete)
-    - Last sync timestamp
     - Validation status
 
     Example:
@@ -957,7 +761,6 @@ def status(ctx, project: Optional[str]):
         click.echo("")
         click.echo(f"Project: {state['project_name']}")
         click.echo(f"Session: {state['session_id']}")
-        click.echo(f"Last Sync: {state.get('last_sync', 'Never')}")
         click.echo("")
         click.echo("Pipeline Stages:")
 
