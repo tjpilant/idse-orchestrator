@@ -207,6 +207,34 @@ mypy src/
 black src/ tests/
 ```
 
+## Self-Dogfooding
+
+This repository uses its own IDSE pipeline structure:
+
+```
+.idse/
+└── projects/
+    └── idse-orchestrator/
+        ├── sessions/
+        │   └── __blueprint__/
+        │       ├── intents/intent.md
+        │       ├── contexts/context.md
+        │       ├── specs/spec.md
+        │       ├── plans/plan.md
+        │       ├── tasks/tasks.md
+        │       ├── implementation/README.md
+        │       ├── feedback/feedback.md
+        │       └── metadata/
+        ├── CURRENT_SESSION
+        └── session_state.json
+```
+
+To check project status:
+```bash
+idse status
+idse validate
+```
+
 ## License
 
 MIT License - See LICENSE file for details
