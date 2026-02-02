@@ -10,12 +10,13 @@
 | 4 | StageStateModel | stage_state_model.py | Implemented | __blueprint__ |
 | 5 | ValidationEngine | validation_engine.py | Implemented | __blueprint__ |
 | 6 | ConstitutionRules | constitution_rules.py | Implemented | __blueprint__ |
-| 7 | DesignStore | design_store.py | Defined (not integrated) | __blueprint__ |
-| 8 | DesignStoreFilesystem | design_store.py | Defined (not integrated) | __blueprint__ |
+| 7 | DesignStore | design_store.py | Implemented (partial integration) | __blueprint__ |
+| 8 | DesignStoreFilesystem | design_store.py | Implemented (partial integration) | __blueprint__ |
 | 9 | AgentRegistry | agent_registry.py | Implemented | __blueprint__ |
 | 10 | IDEAgentRouting | ide_agent_routing.py | Implemented | __blueprint__ |
 | 11 | DocToAgentProfileSpecCompiler | compiler/ | Implemented | __blueprint__ |
 | 12 | CLIInterface | cli.py | Implemented | __blueprint__ |
+| 13 | SyncEngine | sync_engine.py | Implemented | __blueprint__ |
 
 ## Primitive Definitions
 
@@ -29,7 +30,7 @@ Manages session creation, lineage tracking, CURRENT_SESSION pointer, blueprint m
 Loads and renders Jinja2 templates for the 7-stage pipeline: intent, context, spec, plan, tasks, implementation, feedback.
 
 ### StageStateModel
-Tracks pipeline stage progression in `session_state.json`. Supports optional DesignStore backend.
+Tracks pipeline stage progression in `session_state.json`. Tracks last_sync and validation_status. Supports optional DesignStore backend.
 
 ### ValidationEngine
 Applies ConstitutionRules to pipeline artifacts. Writes validation_status to state.
@@ -43,6 +44,9 @@ Abstract storage interface (ABC). Methods: `load_artifact`, `save_artifact`, `li
 ### DesignStoreFilesystem
 Default filesystem implementation of DesignStore. Reads/writes `.idse/projects/<project>/` layout.
 
+### SyncEngine
+Facade over DesignStore for push/pull of pipeline artifacts. Updates StageStateModel.last_sync on successful operations. Backend-agnostic replacement for the former AgencySyncEngine (HTTP client removed in Phase 4).
+
 ### AgentRegistry
 Manages `agent_registry.json`. Methods: `list_agents`, `get_agent`, `get_agents_for_stage`, `register_agent`. Default agents: claude-code (design stages), gpt-codex (implementation).
 
@@ -53,7 +57,7 @@ Routes tasks to IDE agents based on pipeline stage. Uses AgentRegistry for looku
 Reads `## Agent Profile` YAML from spec.md, merges with blueprint defaults, validates via Pydantic, emits YAML profile. Deterministic — no LLM calls.
 
 ### CLIInterface
-Click-based CLI with commands: init, validate, status, session create/switch, spawn, compile agent-spec, sessions, session-info, docs install, generate-agent-files.
+Click-based CLI with commands: init, validate, status, sync push/pull, session create/switch, spawn, compile agent-spec, sessions, session-info, docs install, generate-agent-files.
 
 ## Governance Process
 

@@ -53,6 +53,7 @@ class StageStateModel:
             "session_id": session_id,
             "is_blueprint": is_blueprint,
             "stages": {stage: "pending" for stage in self.STAGE_NAMES},
+            "last_sync": None,
             "validation_status": "unknown",
             "created_at": datetime.now().isoformat(),
         }
@@ -97,6 +98,20 @@ class StageStateModel:
                 return stage
 
         return None
+
+    def mark_synced(self, timestamp: Optional[str] = None) -> None:
+        """
+        Update last sync timestamp.
+
+        Called after DesignStore-backed operations to record when state
+        was last persisted through the store.
+
+        Args:
+            timestamp: ISO format timestamp. Defaults to now.
+        """
+        state = self._read_state()
+        state["last_sync"] = timestamp or datetime.now().isoformat()
+        self._write_state(state)
 
     def get_status(self, project_name: Optional[str] = None) -> Dict:
         """

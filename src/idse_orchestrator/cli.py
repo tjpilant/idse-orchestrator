@@ -160,6 +160,126 @@ def validate(ctx, project: Optional[str]):
 
 
 @main.group()
+def sync():
+    """Sync pipeline artifacts via DesignStore."""
+    pass
+
+
+@sync.command()
+@click.option("--project", help="Project name (uses current if not specified)")
+@click.option("--session", "session_override", help="Session ID (uses CURRENT_SESSION if not specified)")
+@click.pass_context
+def push(ctx, project: Optional[str], session_override: Optional[str]):
+    """
+    Write pipeline artifacts through the DesignStore.
+
+    Persists artifacts via the configured storage backend and
+    updates the sync timestamp.
+
+    Example:
+        idse sync push
+        idse sync push --project customer-portal
+    """
+    from .project_workspace import ProjectWorkspace
+    from .design_store import DesignStoreFilesystem
+    from .sync_engine import SyncEngine
+    from .stage_state_model import StageStateModel
+    from .session_graph import SessionGraph
+
+    try:
+        manager = ProjectWorkspace()
+        if project:
+            project_path = manager.projects_root / project
+        else:
+            project_path = manager.get_current_project()
+            if not project_path:
+                click.echo("❌ Error: No IDSE project found", err=True)
+                sys.exit(1)
+
+        project_name = project_path.name
+        session_id = session_override or SessionGraph(project_path).get_current_session()
+        session_path = project_path / "sessions" / session_id
+
+        artifacts = {}
+        stage_paths = {
+            "intent": session_path / "intents" / "intent.md",
+            "context": session_path / "contexts" / "context.md",
+            "spec": session_path / "specs" / "spec.md",
+            "plan": session_path / "plans" / "plan.md",
+            "tasks": session_path / "tasks" / "tasks.md",
+            "implementation": session_path / "implementation" / "README.md",
+            "feedback": session_path / "feedback" / "feedback.md",
+        }
+        for stage, path in stage_paths.items():
+            if path.exists():
+                artifacts[stage] = path.read_text()
+
+        store = DesignStoreFilesystem(manager.idse_root)
+        tracker = StageStateModel(project_path)
+        engine = SyncEngine(store, tracker)
+
+        click.echo(f"📤 Syncing artifacts for {project_name}/{session_id}...")
+        result = engine.push(project_name, session_id, artifacts)
+
+        click.echo(f"✅ Synced {len(result['synced_stages'])} stages")
+        click.echo(f"   Stages: {', '.join(result['synced_stages'])}")
+        click.echo(f"   Timestamp: {result['timestamp']}")
+
+    except Exception as e:
+        click.echo(f"❌ Error: {e}", err=True)
+        sys.exit(1)
+
+
+@sync.command()
+@click.option("--project", help="Project name (uses current if not specified)")
+@click.option("--session", "session_override", help="Session ID (uses CURRENT_SESSION if not specified)")
+@click.pass_context
+def pull(ctx, project: Optional[str], session_override: Optional[str]):
+    """
+    Read pipeline artifacts from the DesignStore.
+
+    Retrieves artifacts via the configured storage backend.
+
+    Example:
+        idse sync pull
+        idse sync pull --session __blueprint__
+    """
+    from .project_workspace import ProjectWorkspace
+    from .design_store import DesignStoreFilesystem
+    from .sync_engine import SyncEngine
+    from .stage_state_model import StageStateModel
+    from .session_graph import SessionGraph
+
+    try:
+        manager = ProjectWorkspace()
+        if project:
+            project_path = manager.projects_root / project
+        else:
+            project_path = manager.get_current_project()
+            if not project_path:
+                click.echo("❌ Error: No IDSE project found", err=True)
+                sys.exit(1)
+
+        project_name = project_path.name
+        session_id = session_override or SessionGraph(project_path).get_current_session()
+
+        store = DesignStoreFilesystem(manager.idse_root)
+        tracker = StageStateModel(project_path)
+        engine = SyncEngine(store, tracker)
+
+        click.echo(f"📥 Pulling artifacts for {project_name}/{session_id}...")
+        artifacts = engine.pull(project_name, session_id)
+
+        click.echo(f"✅ Retrieved {len(artifacts)} stage artifacts")
+        for stage in artifacts:
+            click.echo(f"   ✓ {stage}")
+
+    except Exception as e:
+        click.echo(f"❌ Error: {e}", err=True)
+        sys.exit(1)
+
+
+@main.group()
 def docs():
     """Manage local IDSE reference docs and templates."""
     pass
@@ -746,6 +866,7 @@ def status(ctx, project: Optional[str]):
     Shows:
     - Current project and session
     - Stage completion status (pending/in_progress/complete)
+    - Last sync timestamp
     - Validation status
 
     Example:
@@ -763,6 +884,7 @@ def status(ctx, project: Optional[str]):
         click.echo("")
         click.echo(f"Project: {state['project_name']}")
         click.echo(f"Session: {state['session_id']}")
+        click.echo(f"Last Sync: {state.get('last_sync', 'Never')}")
         click.echo("")
         click.echo("Pipeline Stages:")
 
