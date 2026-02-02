@@ -752,10 +752,12 @@ def status(ctx, project: Optional[str]):
         idse status
     """
     from .stage_state_model import StageStateModel
+    from .ide_agent_routing import IDEAgentRouting
 
     try:
         tracker = StageStateModel()
         state = tracker.get_status(project)
+        router = IDEAgentRouting()
 
         click.echo("📊 IDSE Project Status")
         click.echo("")
@@ -766,7 +768,9 @@ def status(ctx, project: Optional[str]):
 
         for stage, status in state["stages"].items():
             icon = "✅" if status == "completed" else "🔄" if status == "in_progress" else "⏳"
-            click.echo(f"  {icon} {stage.ljust(15)}: {status}")
+            agent_id = router.get_agent_for_stage(stage)
+            agent_hint = f"  → {agent_id}" if agent_id else ""
+            click.echo(f"  {icon} {stage.ljust(15)}: {status.ljust(12)}{agent_hint}")
 
         click.echo("")
         validation_status = state.get("validation_status", "unknown")
