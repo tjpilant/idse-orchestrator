@@ -1,29 +1,34 @@
 """
-MCP Client
+Agency Sync Engine
 
 Handles Machine-to-Cloud Protocol communication with Agency Core backend.
 """
 
 import requests
+from .session_graph import SessionGraph
 from pathlib import Path
 from typing import Dict, Optional
 from datetime import datetime
 import json
 
 
-class MCPClient:
+class AgencySyncEngine:
     """Client for syncing with Agency Core via MCP protocol."""
 
-    def __init__(self, agency_url: Optional[str] = None, config_path: Optional[Path] = None):
+    def __init__(self, agency_url: Optional[str] = None, config_path: Optional[Path] = None, config=None):
         """
-        Initialize MCP Client.
+        Initialize Agency Sync Engine.
 
         Args:
             agency_url: URL of Agency Core backend (e.g., "https://agency.example.com")
             config_path: Path to .idseconfig.json for credentials
         """
-        self.config = self._load_config(config_path)
-        self.agency_url = agency_url or self.config.get("agency_url") or "http://localhost:8000"
+        if config is None:
+            from .agency_config import AgencyConfig
+
+            config = AgencyConfig()
+        self.config = config
+        self.agency_url = agency_url or getattr(self.config, "agency_url", None) or "http://localhost:8000"
         self.session = requests.Session()
 
     def push_project(self, project_name: Optional[str] = None, session_override: Optional[str] = None) -> Dict:
@@ -36,9 +41,9 @@ class MCPClient:
         Returns:
             Response dict with sync_id and timestamp
         """
-        from .project_manager import ProjectManager
+        from .project_workspace import ProjectWorkspace
 
-        manager = ProjectManager()
+        manager = ProjectWorkspace()
         if project_name:
             project_path = manager.projects_root / project_name
             if not project_path.exists():
@@ -49,17 +54,19 @@ class MCPClient:
                 raise ValueError("No IDSE project found. Run 'idse init' first or use --project.")
 
         # Get current session
-        session_id = session_override or manager.get_current_session(project_path)
+        from .session_graph import SessionGraph
+
+        session_id = session_override or SessionGraph(project_path).get_current_session()
         session_path = project_path / "sessions" / session_id
 
         # Read all artifacts
         artifacts = self._read_artifacts(session_path)
 
         # Read session state
-        from .state_tracker import StateTracker
+        from .stage_state_model import StageStateModel
         from .session_metadata import SessionMetadata
 
-        tracker = StateTracker(project_path)
+        tracker = StageStateModel(project_path)
         state = tracker.get_status()
 
         # Read session metadata
@@ -81,7 +88,7 @@ class MCPClient:
         }
 
         project_key = project_name or project_path.name
-        project_id = manager.get_project_uuid(project_key) or self.config.get("project_id")
+        project_id = manager.get_project_uuid(project_key) or getattr(self.config, "project_id", None)
         payload = {
             "project_id": project_id,
             "project_name": project_key,
@@ -128,9 +135,9 @@ class MCPClient:
         Returns:
             Response dict with artifacts and conflicts (if any)
         """
-        from .project_manager import ProjectManager
+        from .project_workspace import ProjectWorkspace
 
-        manager = ProjectManager()
+        manager = ProjectWorkspace()
         if project_name:
             project_path = manager.projects_root / project_name
             if not project_path.exists():
@@ -140,14 +147,14 @@ class MCPClient:
             if not project_path:
                 raise ValueError("No IDSE project found. Run 'idse init' first or use --project.")
 
-        project_id = self.config.get("project_id")
+        project_id = getattr(self.config, "project_id", None)
         if not project_id:
             raise ValueError("No project_id found. Set it in .idse/config.json or run 'idse sync push' once to store it.")
 
         # Determine session ID - use override, or CURRENT_SESSION, or default to __blueprint__
         session_id = session_override
         if not session_id:
-            session_id = manager.get_current_session(project_path)
+            session_id = SessionGraph(project_path).get_current_session()
         if not session_id:
             session_id = "__blueprint__"
 
@@ -190,13 +197,13 @@ class MCPClient:
         Args:
             pull_response: Response from pull_project()
         """
-        from .project_manager import ProjectManager
+        from .project_workspace import ProjectWorkspace
 
-        manager = ProjectManager()
+        manager = ProjectWorkspace()
         project_path = manager.get_current_project()
 
         # Use session_id from response, or fall back to CURRENT_SESSION
-        session_id = pull_response.get("session_id") or manager.get_current_session(project_path)
+        session_id = pull_response.get("session_id") or SessionGraph(project_path).get_current_session()
         session_path = project_path / "sessions" / session_id
 
         artifacts = pull_response.get("artifacts", {})
@@ -231,14 +238,10 @@ class MCPClient:
         # Update session state (check both old and new field names)
         state_data = pull_response.get("session_state") or pull_response.get("state_json")
         if state_data:
-            from .state_tracker import StateTracker
+            from .stage_state_model import StageStateModel
 
-            tracker = StateTracker(project_path)
-            state_file = session_path / "metadata" / "session_state.json"
-
-            state_file.parent.mkdir(parents=True, exist_ok=True)
-            with state_file.open("w") as f:
-                json.dump(state_data, f, indent=2)
+            tracker = StageStateModel(project_path)
+            tracker._write_state(state_data)
 
             tracker.mark_synced(pull_response.get("updated_at"))
 
@@ -281,45 +284,15 @@ class MCPClient:
 
         return artifacts
 
-    def _load_config(self, config_path: Optional[Path] = None) -> Dict:
-        """
-        Load configuration from .idseconfig.json.
-
-        Args:
-            config_path: Optional path to config file
-
-        Returns:
-            Configuration dictionary
-        """
-        config_candidates = []
-
-        if config_path:
-            config_candidates.append(Path(config_path))
-        else:
-            # Try workspace-level config first
-            try:
-                from .project_manager import ProjectManager
-
-                manager = ProjectManager()
-                config_candidates.append(manager.idse_root / "config.json")
-            except Exception:
-                pass
-
-            # Then fall back to home directory config
-            config_candidates.append(Path.home() / ".idseconfig.json")
-
-        for path in config_candidates:
-            if path and path.exists():
-                with path.open("r") as f:
-                    return json.load(f)
-
-        return {"agency_url": "http://localhost:8000", "client_id": None, "project_id": None}
-
     def _save_project_id(self, project_id: str) -> None:
         """Persist project_id for future syncs."""
-        from .project_manager import ProjectManager
+        if hasattr(self.config, "set_project_id"):
+            self.config.set_project_id(project_id)
+            return
 
-        manager = ProjectManager()
+        from .project_workspace import ProjectWorkspace
+
+        manager = ProjectWorkspace()
         config_file = manager.idse_root / "config.json"
         config_file.parent.mkdir(parents=True, exist_ok=True)
 
@@ -332,4 +305,3 @@ class MCPClient:
         config["agency_url"] = self.agency_url
 
         config_file.write_text(json.dumps(config, indent=2))
-        self.config.update(config)

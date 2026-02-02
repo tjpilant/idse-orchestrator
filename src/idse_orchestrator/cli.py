@@ -59,13 +59,13 @@ def init(ctx, project_name: str, stack: str, guided: bool, agentic: Optional[str
         idse init customer-portal --stack python
         idse init my-agency --agentic agency-swarm --guided
     """
-    from .project_manager import ProjectManager
+    from .project_workspace import ProjectWorkspace
 
     click.echo(f"🚀 Initializing IDSE project: {project_name}")
     click.echo(f"   Stack: {stack}")
 
     try:
-        manager = ProjectManager()
+        manager = ProjectWorkspace()
         project_path = manager.init_project(project_name, stack, client_id, create_agent_files)
 
         # Run guided setup if requested
@@ -140,12 +140,12 @@ def validate(ctx, project: Optional[str]):
         idse validate
         idse validate --project customer-portal
     """
-    from .validator import Validator
+    from .validation_engine import ValidationEngine
 
     click.echo("🔍 Validating IDSE pipeline artifacts...")
 
     try:
-        validator = Validator()
+        validator = ValidationEngine()
         results = validator.validate_project(project)
 
         if results["valid"]:
@@ -203,6 +203,39 @@ def docs_install(ctx, force: bool):
         sys.exit(1)
 
 
+@main.group()
+def compile():
+    """Compile IDSE artifacts into machine-executable specs."""
+    pass
+
+
+@compile.command("agent-spec")
+@click.option("--project", help="Project name")
+@click.option("--session", "session_id", required=True, help="Feature session ID")
+@click.option("--blueprint", default="__blueprint__", help="Blueprint session for defaults")
+@click.option("--out", type=click.Path(), help="Output directory")
+@click.option("--dry-run", is_flag=True, help="Validate and print without writing")
+def compile_agent_spec_cmd(project: Optional[str], session_id: str, blueprint: str, out: Optional[str], dry_run: bool):
+    """Compile AgentProfileSpec from spec.md."""
+    from .compiler import compile_agent_spec
+
+    try:
+        output = compile_agent_spec(
+            project=project,
+            session_id=session_id,
+            blueprint_id=blueprint,
+            out_dir=Path(out) if out else None,
+            dry_run=dry_run,
+        )
+        if dry_run:
+            click.echo(output)
+        else:
+            click.echo(f"✅ Agent spec written: {output}")
+    except Exception as e:
+        click.echo(f"❌ Error: {e}", err=True)
+        sys.exit(1)
+
+
 @sync.command()
 @click.option("--project", help="Project name (uses current if not specified)")
 @click.option("--agency-url", envvar="IDSE_AGENCY_URL", help="Agency Core URL")
@@ -219,14 +252,14 @@ def push(ctx, project: Optional[str], agency_url: Optional[str], session_overrid
         idse sync push
         idse sync push --project customer-portal
     """
-    from .mcp_client import MCPClient
-    from .validator import Validator
+    from .agency_sync_engine import AgencySyncEngine
+    from .validation_engine import ValidationEngine
 
     click.echo("📤 Syncing to Agency Core...")
 
     # Validate first
     click.echo("   Validating artifacts...")
-    validator = Validator()
+    validator = ValidationEngine()
     results = validator.validate_project(project)
 
     if not results["valid"]:
@@ -236,7 +269,7 @@ def push(ctx, project: Optional[str], agency_url: Optional[str], session_overrid
         sys.exit(1)
 
     try:
-        client = MCPClient(agency_url)
+        client = AgencySyncEngine(agency_url)
         response = client.push_project(project, session_override=session_override)
 
         click.echo(f"✅ Synced successfully!")
@@ -271,12 +304,12 @@ def pull(ctx, project: Optional[str], agency_url: Optional[str], session_overrid
         idse sync pull --session __blueprint__
         idse sync pull --force
     """
-    from .mcp_client import MCPClient
+    from .agency_sync_engine import AgencySyncEngine
 
     click.echo("📥 Pulling from Agency Core...")
 
     try:
-        client = MCPClient(agency_url)
+        client = AgencySyncEngine(agency_url)
         response = client.pull_project(project, force=force, session_override=session_override)
 
         session_id = response.get("session_id", "unknown")
@@ -313,9 +346,9 @@ def blueprint():
 @click.option("--agency-url", envvar="AGENCY_URL", default="http://127.0.0.1:8000")
 def list_blueprints(agency_url: str):
     """List available blueprints from Agency Core"""
-    from .mcp_client import MCPClient
+    from .agency_sync_engine import AgencySyncEngine
 
-    client = MCPClient(agency_url)
+    client = AgencySyncEngine(agency_url)
     target_url = client.agency_url
 
     try:
@@ -343,13 +376,13 @@ def list_blueprints(agency_url: str):
 @click.option("--agency-url", envvar="AGENCY_URL", default="http://127.0.0.1:8000")
 def install_blueprint(source_project: str, target_project: str, agency_url: str):
     """Install blueprint from existing project"""
-    from .mcp_client import MCPClient
-    from .project_manager import ProjectManager
+    from .agency_sync_engine import AgencySyncEngine
+    from .project_workspace import ProjectWorkspace
 
     click.echo(f"📥 Installing blueprint from {source_project}...")
 
     try:
-        client = MCPClient(agency_url)
+        client = AgencySyncEngine(agency_url)
         target_url = client.agency_url
 
         resp = requests.get(f"{target_url}/sync/blueprints", timeout=30)
@@ -362,7 +395,7 @@ def install_blueprint(source_project: str, target_project: str, agency_url: str)
 
         artifacts = client.pull_blueprint(source["project_id"])
 
-        manager = ProjectManager()
+        manager = ProjectWorkspace()
         project_path = manager.init_project(target_project, stack="python", client_id=None, create_agent_files=False)
 
         session_path = project_path / "sessions" / "__blueprint__"
@@ -401,10 +434,10 @@ def session():
 @click.pass_context
 def create_session(ctx, session_name: str, project: str):
     """Create new feature session within project"""
-    from .project_manager import ProjectManager
-    from .template_loader import TemplateLoader
+    from .project_workspace import ProjectWorkspace
+    from .pipeline_artifacts import PipelineArtifacts
 
-    manager = ProjectManager()
+    manager = ProjectWorkspace()
 
     if not project:
         current_proj = manager.get_current_project()
@@ -447,7 +480,7 @@ def create_session(ctx, session_name: str, project: str):
     for dir_path in dirs_to_create:
         dir_path.mkdir(parents=True, exist_ok=True)
 
-    loader = TemplateLoader()
+    loader = PipelineArtifacts()
     artifacts = loader.load_all_templates(project_name=project, stack="python")
 
     artifact_map = {
@@ -467,13 +500,17 @@ def create_session(ctx, session_name: str, project: str):
     owner_file = session_path / "metadata" / ".owner"
     owner_file.write_text(f"Created: {datetime.now().isoformat()}\n")
 
-    (project_path / "CURRENT_SESSION").write_text(session_id)
+    from .session_graph import SessionGraph
+    
+    SessionGraph(project_path).set_current_session(session_id)
 
     click.echo(f"✅ Feature session created: {session_id}")
     click.echo(f"📁 Location: {session_path}")
     click.echo(f"📝 CURRENT_SESSION updated to: {session_id}")
     try:
-        manager.rebuild_blueprint_meta(project_path)
+        from .session_graph import SessionGraph
+
+        SessionGraph(project_path).rebuild_blueprint_meta(project_path)
         click.echo("📘 Blueprint meta.md refreshed.")
     except Exception as meta_err:
         click.echo(f"⚠️  Warning: Failed to refresh blueprint meta: {meta_err}", err=True)
@@ -484,9 +521,9 @@ def create_session(ctx, session_name: str, project: str):
 @click.option("--project", help="Project name (uses current if not specified)")
 def switch_session(session_id: str, project: str):
     """Switch the active session pointer (CURRENT_SESSION)."""
-    from .project_manager import ProjectManager
+    from .project_workspace import ProjectWorkspace
 
-    manager = ProjectManager()
+    manager = ProjectWorkspace()
 
     if not project:
         current_proj = manager.get_current_project()
@@ -504,10 +541,14 @@ def switch_session(session_id: str, project: str):
         click.echo(f"❌ Error: Session '{session_id}' not found in project '{project}'", err=True)
         sys.exit(1)
 
-    (project_path / "CURRENT_SESSION").write_text(session_id)
+    from .session_graph import SessionGraph
+    
+    SessionGraph(project_path).set_current_session(session_id)
     click.echo(f"📝 CURRENT_SESSION updated to: {session_id}")
     try:
-        manager.rebuild_blueprint_meta(project_path)
+        from .session_graph import SessionGraph
+
+        SessionGraph(project_path).rebuild_blueprint_meta(project_path)
         click.echo("📘 Blueprint meta.md refreshed.")
     except Exception as meta_err:
         click.echo(f"⚠️  Warning: Failed to refresh blueprint meta: {meta_err}", err=True)
@@ -535,12 +576,12 @@ def spawn(ctx, plan: str, feature_name: str, project: Optional[str], blueprint: 
         idse spawn --plan feature sync-bridge --owner gpt5 --description "Notion-VSCode sync"
         idse spawn --plan feature auth-service --blueprint __blueprint__
     """
-    from .project_manager import ProjectManager
+    from .project_workspace import ProjectWorkspace
 
     click.echo(f"🚀 Spawning feature session: {feature_name}")
 
     try:
-        manager = ProjectManager()
+        manager = ProjectWorkspace()
 
         # Auto-detect project if not specified
         if not project:
@@ -574,9 +615,10 @@ def spawn(ctx, plan: str, feature_name: str, project: Optional[str], blueprint: 
         if description:
             click.echo(f"   Description: {description}")
 
-        # Create feature session using ProjectManager
-        session_path = manager.create_feature_session(
-            project_path=project_path,
+        # Create feature session using SessionGraph
+        from .session_graph import SessionGraph
+
+        session_path = SessionGraph(project_path).create_feature_session(
             session_id=feature_name,
             parent_session=blueprint,
             description=description,
@@ -584,7 +626,9 @@ def spawn(ctx, plan: str, feature_name: str, project: Optional[str], blueprint: 
         )
 
         # Update blueprint meta.md
-        manager.update_blueprint_meta(project_path, session_path)
+        from .session_graph import SessionGraph
+
+        SessionGraph(project_path).update_blueprint_meta(project_path, session_path)
 
         click.echo("")
         click.echo(f"✅ Feature session '{feature_name}' spawned successfully!")
@@ -622,7 +666,7 @@ def generate_agent_files(ctx, project: Optional[str], stack: str, force: bool):
         idse generate-agent-files --project studiompd --stack python
         idse generate-agent-files --project studiompd --force
     """
-    from .project_manager import ProjectManager
+    from .project_workspace import ProjectWorkspace
 
     if not project:
         click.echo("❌ Error: --project is required", err=True)
@@ -631,7 +675,7 @@ def generate_agent_files(ctx, project: Optional[str], stack: str, force: bool):
     click.echo(f"🤖 Generating agent instruction files for: {project}")
 
     try:
-        manager = ProjectManager()
+        manager = ProjectWorkspace()
 
         # Check if project exists
         project_path = manager.projects_root / project
@@ -694,11 +738,11 @@ def sessions(ctx, project: Optional[str], session_type: Optional[str], session_s
         idse sessions --status in_progress
         idse sessions --tag critical
     """
-    from .project_manager import ProjectManager
+    from .project_workspace import ProjectWorkspace
     from .session_manager import SessionManager
 
     try:
-        manager = ProjectManager()
+        manager = ProjectWorkspace()
 
         # Auto-detect project if not specified
         if not project:
@@ -793,11 +837,11 @@ def session_info(ctx, session_id: str, project: Optional[str], lineage: bool):
         idse session-info sync-bridge
         idse session-info __blueprint__ --lineage
     """
-    from .project_manager import ProjectManager
+    from .project_workspace import ProjectWorkspace
     from .session_manager import SessionManager
 
     try:
-        manager = ProjectManager()
+        manager = ProjectWorkspace()
 
         # Auto-detect project if not specified
         if not project:
@@ -903,10 +947,10 @@ def status(ctx, project: Optional[str]):
     Example:
         idse status
     """
-    from .state_tracker import StateTracker
+    from .stage_state_model import StageStateModel
 
     try:
-        tracker = StateTracker()
+        tracker = StageStateModel()
         state = tracker.get_status(project)
 
         click.echo("📊 IDSE Project Status")
@@ -918,7 +962,7 @@ def status(ctx, project: Optional[str]):
         click.echo("Pipeline Stages:")
 
         for stage, status in state["stages"].items():
-            icon = "✅" if status == "complete" else "🔄" if status == "in_progress" else "⏳"
+            icon = "✅" if status == "completed" else "🔄" if status == "in_progress" else "⏳"
             click.echo(f"  {icon} {stage.ljust(15)}: {status}")
 
         click.echo("")

@@ -50,9 +50,9 @@ def install_agency_swarm(project_path: Path, stack: str) -> None:
 
     print("\n🤖 Installing Agency Swarm framework resources...")
 
-    # Resolve repository root (four levels up from this file)
-    repo_root = Path(__file__).parent.parent.parent.parent
-    constitution_src = repo_root / ".idse" / "governance" / "AGENCY_SWARM_CONSTITUTION.md"
+    # Resolve packaged governance files
+    pkg_governance = Path(__file__).parent / "governance"
+    constitution_src = pkg_governance / "AGENCY_SWARM_CONSTITUTION.md"
 
     # Project-scoped governance directory
     governance_dir = project_path / ".idse" / "governance"
@@ -75,8 +75,6 @@ def install_agency_swarm(project_path: Path, stack: str) -> None:
         / "rules"
         / "workflow.mdc"
     )
-    fallback_workflow_src = repo_root / ".cursor" / "rules" / "workflow.mdc"
-
     # Copy workflow into USER'S working directory repo root for IDE usage
     # Find the git root by walking up from current working directory
     user_cwd = Path.cwd()
@@ -93,12 +91,8 @@ def install_agency_swarm(project_path: Path, stack: str) -> None:
     if workflow_src.exists():
         shutil.copy(workflow_src, workflow_dst)
         print(f"  ✓ Copied .cursor/rules/workflow.mdc to {workflow_dst}")
-    elif fallback_workflow_src.exists():
-        shutil.copy(fallback_workflow_src, workflow_dst)
-        print(f"  ✓ Copied .cursor/rules/workflow.mdc (fallback) to {workflow_dst}")
     else:
         print(f"  ⚠ Warning: Workflow not found at {workflow_src}")
-        print(f"     Fallback also missing at {fallback_workflow_src}")
         print("     Run: git submodule update --init --recursive to fetch template")
 
     # Source directory: agency-starter-template submodule

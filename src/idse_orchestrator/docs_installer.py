@@ -45,20 +45,17 @@ def install_docs(workspace: Path, force: bool = False) -> Tuple[int, int]:
     target_docs = workspace / ".idse" / "docs"
     target_templates = workspace / ".idse" / "kb" / "templates"
 
-    # Locate packaged resources; fallback to repo-level docs if running editable
+    # Locate packaged resources
     pkg_root = Path(__file__).resolve().parent
-    repo_root = pkg_root.parent.parent.parent  # back to repo root when editable
 
     doc_source = _first_existing_path(
         [
             pkg_root / "resources" / "docs",
-            repo_root / "docs",
         ]
     )
     template_source = _first_existing_path(
         [
             pkg_root / "resources" / "templates",
-            repo_root / "docs" / "kb" / "templates",
         ]
     )
 

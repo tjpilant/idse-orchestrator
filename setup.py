@@ -23,10 +23,10 @@ setup(
     description="CLI tool for managing Intent-Driven Systems Engineering (IDSE) projects",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/idse-agency/idse-orchestrator",
+    url="https://github.com/tjpilant/idse-orchestrator",
     project_urls={
-        "Documentation": "https://docs.idse-agency.dev",
-        "Source": "https://github.com/idse-agency/idse-orchestrator",
+        "Documentation": "https://github.com/tjpilant/idse-orchestrator#readme",
+        "Source": "https://github.com/tjpilant/idse-orchestrator",
     },
     packages=find_packages(where="src"),
     package_dir={"": "src"},

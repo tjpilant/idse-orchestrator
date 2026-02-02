@@ -259,5 +259,5 @@ MIT License - See LICENSE file for details
 ## Support
 
 For issues and questions:
-- GitHub Issues: https://github.com/idse-agency/idse-orchestrator/issues
-- Documentation: https://docs.idse-agency.dev
+- GitHub Issues: https://github.com/tjpilant/idse-orchestrator/issues
+- Documentation: https://github.com/tjpilant/idse-orchestrator#readme

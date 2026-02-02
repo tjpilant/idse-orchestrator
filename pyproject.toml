@@ -47,6 +47,6 @@ dev = [
 idse = "idse_orchestrator.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/idse-agency/idse-orchestrator"
-Documentation = "https://docs.idse-agency.dev"
-Repository = "https://github.com/idse-agency/idse-orchestrator"
+Homepage = "https://github.com/tjpilant/idse-orchestrator"
+Documentation = "https://github.com/tjpilant/idse-orchestrator#readme"
+Repository = "https://github.com/tjpilant/idse-orchestrator"

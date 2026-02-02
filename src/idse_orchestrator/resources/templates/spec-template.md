@@ -27,3 +27,21 @@
 
 ## Open Questions
 - [REQUIRES INPUT] ...
+
+## Agent Profile
+
+```yaml
+id: [REQUIRES INPUT]
+name: [REQUIRES INPUT]
+description:
+goals: []
+inputs: []
+outputs: []
+tools: []
+constraints: []
+memory_policy: {}
+runtime_hints: {}
+version: "1.0"
+source_session:
+source_blueprint:
+```
