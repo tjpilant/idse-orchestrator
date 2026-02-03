@@ -182,7 +182,6 @@ def push(ctx, project: Optional[str], session_override: Optional[str]):
     """
     from .project_workspace import ProjectWorkspace
     from .design_store import DesignStoreFilesystem
-    from .sync_engine import SyncEngine
     from .stage_state_model import StageStateModel
     from .session_graph import SessionGraph
 
@@ -216,14 +215,14 @@ def push(ctx, project: Optional[str], session_override: Optional[str]):
 
         store = DesignStoreFilesystem(manager.idse_root)
         tracker = StageStateModel(project_path)
-        engine = SyncEngine(store, tracker)
 
         click.echo(f"📤 Syncing artifacts for {project_name}/{session_id}...")
-        result = engine.push(project_name, session_id, artifacts)
+        pushed = store.push_artifacts(project_name, session_id, artifacts)
+        tracker.mark_synced()
 
-        click.echo(f"✅ Synced {len(result['synced_stages'])} stages")
-        click.echo(f"   Stages: {', '.join(result['synced_stages'])}")
-        click.echo(f"   Timestamp: {result['timestamp']}")
+        click.echo(f"✅ Synced {len(pushed)} stages")
+        click.echo(f"   Stages: {', '.join(pushed)}")
+        click.echo(f"   Timestamp: {tracker.get_status().get('last_sync')}")
 
     except Exception as e:
         click.echo(f"❌ Error: {e}", err=True)
@@ -246,7 +245,6 @@ def pull(ctx, project: Optional[str], session_override: Optional[str]):
     """
     from .project_workspace import ProjectWorkspace
     from .design_store import DesignStoreFilesystem
-    from .sync_engine import SyncEngine
     from .stage_state_model import StageStateModel
     from .session_graph import SessionGraph
 
@@ -265,10 +263,10 @@ def pull(ctx, project: Optional[str], session_override: Optional[str]):
 
         store = DesignStoreFilesystem(manager.idse_root)
         tracker = StageStateModel(project_path)
-        engine = SyncEngine(store, tracker)
 
         click.echo(f"📥 Pulling artifacts for {project_name}/{session_id}...")
-        artifacts = engine.pull(project_name, session_id)
+        artifacts = store.pull_artifacts(project_name, session_id)
+        tracker.mark_synced()
 
         click.echo(f"✅ Retrieved {len(artifacts)} stage artifacts")
         for stage in artifacts:

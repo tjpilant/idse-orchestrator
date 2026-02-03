@@ -84,6 +84,28 @@ class DesignStoreFilesystem(DesignStore):
         state_file.parent.mkdir(parents=True, exist_ok=True)
         _write_json(state_file, state)
 
+    def push_artifacts(self, project: str, session_id: str, artifacts: Dict[str, str]) -> List[str]:
+        """Persist artifacts by stage. Returns list of stages written."""
+        pushed = []
+        for stage, content in artifacts.items():
+            if stage in self.STAGE_PATHS:
+                self.save_artifact(project, session_id, stage, content)
+                pushed.append(stage)
+        return pushed
+
+    def pull_artifacts(self, project: str, session_id: str, stages: Optional[List[str]] = None) -> Dict[str, str]:
+        """Load artifacts by stage. Missing files are skipped."""
+        stages_to_pull = stages or list(self.STAGE_PATHS.keys())
+        artifacts: Dict[str, str] = {}
+        for stage in stages_to_pull:
+            if stage not in self.STAGE_PATHS:
+                continue
+            try:
+                artifacts[stage] = self.load_artifact(project, session_id, stage)
+            except FileNotFoundError:
+                continue
+        return artifacts
+
 
 def _read_json(path: Path) -> Dict:
     import json
