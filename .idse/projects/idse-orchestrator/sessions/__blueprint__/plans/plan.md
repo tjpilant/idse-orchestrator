@@ -1,79 +1,120 @@
-# Plan — PRD Context Mode  
-> **This Plan serves as both an Implementation Plan and a Product Requirements Document (PRD).**  
-> It merges the *product vision* (why we are building this system) with the *technical realization plan* (how it will be implemented).  
-> It is a canonical artifact of the IDSE pipeline, governed by Articles I–IX of the IDSE Constitution, and must be validated via `idse validate` before implementation.
+# Plan: IDSE Orchestrator SDK
+
+## 1. Phased delivery
+
+### Phase 0 – Repo extraction and scaffolding
+
+- Extract Orchestrator code into its own `idse-orchestrator` repo.
+- Establish `.idse/projects/idse-orchestrator/` as the Orchestrator's own IDSE project.
+- Capture this blueprint pipeline as the root `__blueprint__` session.
+
+**Exit criteria:**
+- Repo exists, installable in editable mode.
+- `idse init` works for a simple test project.
+- Orchestrator itself is dogfooding its IDSE pipeline.
 
 ---
 
-## 0. Product Overview
+### Phase 1 – MVP Workspace + Pipeline
 
-**Goal / Outcome:**  
-[Describe what this system achieves — the end-user or business value.]
+Scope: `ProjectWorkspace`, `SessionGraph`, `PipelineArtifacts`, `StageStateModel`, `CLIInterface` (core commands).
 
-**Problem Statement:**  
-[What problem does this system solve? Why now?]
+- Implement:
+	- Project creation: `.idse/projects/<project>/`
+	- Session creation: `sessions/<session-id>/` with full pipeline structure
+	- `CURRENT_SESSION` semantics
+	- `session_state.json` with basic stage statuses
+	- CLI:
+		- `idse init`
+		- `idse status`
 
-**Target Users or Use Cases:**  
-[Who benefits and how do they interact with it?]
+**Exit criteria:**
+- A developer can:
+	- Initialize a project
+	- See pipeline structure
+	- View basic status of each stage
 
-**Success Metrics:**  
-[Quantitative or qualitative outcomes that define success.]
+---
 
-## 1. Architecture Summary
+### Phase 2 – Governance (Validation + Constitution)
 
-Provide a high-level overview of the system/feature. Describe major components
-and how they interact. Link to diagrams (SVG, sequence, component) if helpful.
+Scope: `ValidationEngine`, `ConstitutionRules`.
 
-## 2. Components
+- Implement:
+	- Core Constitution rules (Articles) as a declarative rule set.
+	- `idse validate`:
+		- Required pipeline artifacts
+		- `[REQUIRES INPUT]` checks
+		- Basic structure/ordering rules
+	- Integration with `session_state.json.validation_status`.
 
-List services, modules, libraries, or functions. For each, note responsibility,
-boundaries, and interactions.
+**Exit criteria:**
+- Invalid pipelines are clearly flagged.
+- `idse status` shows validation status.
+- Constitution rules are versioned and inspectable.
 
-| Component | Responsibility | Interfaces / Dependencies |
-| --- | --- | --- |
-| ... | ... | ... |
+---
 
-## 3. Data Model
+### Phase 3 – Agency Sync
 
-List entities and relationships. Include schemas (SQL/NoSQL), indexes, and
-normalization/denormalization choices. For event-driven designs, include event
-schemas.
+Scope: `DesignStore` maturation, `SyncEngine`, `AgencyConfig`.
 
-## 4. API Contracts
+- Implement:
+	- `DesignStoreFilesystem` as the canonical storage backend.
+	- `AgencyConfig` (config file + env vars).
+	- `idse sync push` / `idse sync pull`:
+		- Upload/download pipeline artifacts & state.
+		- Update `last_sync`.
+- Design payload format and minimal sync protocol with Agency Core.
 
-Define public APIs (HTTP/GraphQL/gRPC/WebSocket).
+**Exit criteria:**
+- A project's IDSE artifacts can be mirrored into Agency Core and back.
+- Conflicts are at least visible (manual resolution is acceptable for MVP).
 
-- Endpoint / Method / Path
-- Description
-- Request: URL, headers, body (required/optional fields)
-- Response: status codes, headers, body (types)
-- Error handling: codes/messages
-- Security: authn/authz, rate limits
+---
 
-## 5. Test Strategy
+### Phase 4 – Agent Coordination
 
-IDSE mandates test-first; describe validation before implementation:
+Scope: `AgentRegistry`, `IDEAgentRouting`.
 
-- Unit: modules/functions with mocks.
-- Contract: API schemas and backward compatibility.
-- Integration: component/service/DB interactions.
-- End-to-end: user workflows.
-- Performance: scalability/latency under load.
-- Security: auth flows, input validation.
+- Implement:
+	- `agent_registry.json` schema and loader.
+	- Routing logic: map stages → agents.
+	- CLI helpers (or output in `idse status`) suggesting which agent to use per stage.
 
-Include environments/tooling (e.g., Jest, PyTest, Postman, Cypress) and success
-criteria.
+**Exit criteria:**
+- Team can see "Claude handles intent/context/spec/plan, Codex handles implementation" in status/UI.
+- IDE integrations can query which agent to use.
 
-## 6. Phases
+---
 
-Break work into phases; each should deliver incremental value and be
-independent where possible.
+### Phase 5 – Doc → AgentProfileSpec compiler
 
-- Phase 0: Foundations (architecture decisions, documented schemas, API contracts).
-- Phase 1: Core behavior (documented implementation approach).
-- Phase 2: NFRs (scale, security, resilience strategies).
-- Phase 3: Cleanup/Hardening (refinements, additional validation).
+Scope: `DocToAgentProfileSpecCompiler`.
 
-**Note:** This plan is **documentation** that guides the IDE/development team.
-The actual code, schemas, and configurations will be created by the development
-team in the appropriate codebase directories (src/, backend/, frontend/, etc.).
+- Implement:
+	- `## Agent Profile` YAML block convention in `specs/spec.md`.
+	- Compiler that:
+		- Reads pipeline spec via `DesignStore`.
+		- Builds `AgentProfileSpec` object.
+		- Validates and writes spec output file.
+	- CLI: `idse compile agent-spec --session <id>`.
+
+**Exit criteria:**
+- Given a filled-out `spec.md`, Orchestrator can produce a valid `AgentProfileSpec`.
+- PromptBraining / Agency Core can consume that spec without special casing.
+
+---
+
+## 2. Session strategy
+
+- `__blueprint__` – this document (product-level intent/context/spec/plan/tasks).
+- `spine-primitives` – session documenting and evolving the Product Spine entries.
+- One session per significant primitive or feature:
+	- `session-graph-mvp`
+	- `validation-engine-mvp`
+	- `sync-engine-mvp`
+	- `doc2agentspec-v1`
+	- etc.
+
+Each feature session inherits intent/context from the Blueprint and narrows it for that primitive.

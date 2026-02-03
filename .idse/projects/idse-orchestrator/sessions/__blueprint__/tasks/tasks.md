@@ -1,21 +1,62 @@
-# Tasks
+# Tasks: IDSE Orchestrator SDK
 
-[P] = parallel safe
+> These are Blueprint-level tasks (epics). Each should spawn its own feature session with a more detailed task breakdown.
 
-## Instructions
-- Derive tasks directly from the implementation plan and contracts.
-- For each task, note owner, dependencies, and acceptance/validation notes.
-- Keep tasks independent and testable; mark parallelizable tasks with [P].
-- **These tasks guide the IDE/development team** - they describe what needs to be done, not where code should be written.
+## 1. Repo & self-dogfooding
 
-## Phase 0 – Foundations
-- [ ] Task 0.1 – ... (Owner: ...) (Deps: ...) (Acceptance: ...)
-- [ ] Task 0.2 – ...
+- [ ] Create `idse-orchestrator` repo and migrate existing orchestrator code.
+- [ ] Initialize `.idse/projects/idse-orchestrator/` with a `__blueprint__` session.
+- [ ] Save this Blueprint pipeline into the `__blueprint__` session.
+- [ ] Document how to run `idse` inside this repo for self-dogfooding.
 
-## Phase 1 – Core Behavior
-- [ ] Task 1.1 – ...
-- [ ] Task 1.2 – ...
+## 2. Phase 1 – Workspace + Pipeline
 
-## Phase 2 – NFRs / Hardening
-- [ ] Task 2.1 – ...
-- [ ] Task 2.2 – ...
+- [ ] Implement `ProjectWorkspace` for `.idse/projects/<project>/` layout.
+- [ ] Implement `SessionGraph` with creation + listing.
+- [ ] Implement `PipelineArtifacts` generation (intents/contexts/specs/plans/tasks/...).
+- [ ] Implement `StageStateModel` + `session_state.json` wiring.
+- [ ] Implement `CLIInterface` commands:
+	- [ ] `idse init <project>`
+	- [ ] `idse status`
+
+## 3. Phase 2 – Governance
+
+- [ ] Define `ConstitutionRules` as a declarative rule set.
+- [ ] Implement `ValidationEngine` to apply rules to pipeline artifacts.
+- [ ] Wire `idse validate` → `ValidationEngine` → `session_state.json.validation_status`.
+- [ ] Update `idse status` to show validation status.
+
+## 4. Phase 3 – Sync
+
+- [ ] Finalize `DesignStore` interface and `DesignStoreFilesystem` implementation.
+- [ ] Implement `AgencyConfig` (config file + env vars).
+- [ ] Implement `SyncEngine`:
+	- [ ] `idse sync push`
+	- [ ] `idse sync pull`
+- [ ] Define and document the sync payload schema with Agency Core.
+
+## 5. Phase 4 – Agent Coordination
+
+- [ ] Define `agent_registry.json` schema.
+- [ ] Implement `AgentRegistry` loader and validation.
+- [ ] Implement `IDEAgentRouting` helpers (e.g., `get_agents_for_stage(stage)`).
+- [ ] Update `idse status` (or a dedicated command) to show per-stage agent suggestions.
+
+## 6. Phase 5 – Doc → AgentProfileSpec compiler
+
+- [ ] Define `AgentProfileSpec` schema (shared or local) for IDSE.
+- [ ] Define `## Agent Profile` YAML structure in `specs/spec.md` templates.
+- [ ] Implement `DocToAgentProfileSpecCompiler`:
+	- [ ] Read `specs/spec.md` via `DesignStore`.
+	- [ ] Parse YAML block → `AgentProfileSpec`.
+	- [ ] Validate and write out spec file.
+- [ ] Implement `idse compile agent-spec --session <id>` CLI command.
+- [ ] Document integration with PromptBraining / Agency Core.
+
+## 7. Governance & Spine alignment
+
+- [ ] Create an `idse-orchestrator` Product Spine table listing all primitives.
+- [ ] Ensure each primitive has:
+	- [ ] At least one IDSE feature session
+	- [ ] Linked Blueprint tasks
+- [ ] Define a process for manually updating Milestones and Status for Orchestrator Spine entries based on lifecycle IDSE artifacts.
