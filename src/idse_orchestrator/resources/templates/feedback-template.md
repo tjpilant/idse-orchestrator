@@ -1,21 +1,20 @@
 # Feedback
 
 ## External / Internal Feedback
-- [REQUIRES INPUT] Summarize feedback received (who, what, when)
+- TODO: Summarize feedback received (who, what, when)
 
 ## Impacted Artifacts
-- Intent: [REQUIRES INPUT] (yes/no/sections)
-- Context: [REQUIRES INPUT]
-- Spec: [REQUIRES INPUT]
-- Plan / Test Plan: [REQUIRES INPUT]
-- Tasks / Implementation: [REQUIRES INPUT]
+- Intent: TODO (yes/no/sections)
+- Context: TODO
+- Spec: TODO
+- Plan / Test Plan: TODO
+- Tasks / Implementation: TODO
 
 ## Risks / Issues Raised
-- [REQUIRES INPUT] ...
+- TODO
 
 ## Actions / Follow-ups
-- [REQUIRES INPUT] Owner, due date, status
+- TODO: Owner, due date, status
 
 ## Decision Log
-- [REQUIRES INPUT] Decisions made and rationale
-
+- TODO: Decisions made and rationale

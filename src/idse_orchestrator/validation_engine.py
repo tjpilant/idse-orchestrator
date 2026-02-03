@@ -76,7 +76,8 @@ class ValidationEngine:
             artifact_path = self._get_artifact_path(session_path, artifact)
             if artifact_path.exists():
                 content = artifact_path.read_text()
-                if "[REQUIRES INPUT]" in content:
+                scan_text = self._strip_code(content)
+                if "[REQUIRES INPUT]" in scan_text:
                     errors.append(f"{artifact} contains [REQUIRES INPUT] markers")
                 else:
                     checks.append(f"{artifact} has no [REQUIRES INPUT] markers")
@@ -115,3 +116,11 @@ class ValidationEngine:
         }
 
         return artifact_map.get(artifact_name, session_path / artifact_name)
+
+    def _strip_code(self, content: str) -> str:
+        """Remove fenced code blocks and inline code spans before scanning."""
+        # Remove fenced code blocks
+        content = re.sub(r"```[\\s\\S]*?```", "", content)
+        # Remove inline code spans
+        content = re.sub(r"`[^`]*`", "", content)
+        return content
