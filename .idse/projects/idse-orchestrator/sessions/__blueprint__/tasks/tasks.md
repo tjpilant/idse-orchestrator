@@ -33,7 +33,7 @@
 - [ ] Implement `SyncEngine`:
 	- [ ] `idse sync push`
 	- [ ] `idse sync pull`
-- [ ] Define and document the sync payload schema with Agency Core.
+- [ ] Define and document the sync payload schema with Artifact Core.
 
 ## 5. Phase 4 – Agent Coordination
 
@@ -51,7 +51,7 @@
 	- [ ] Parse YAML block → `AgentProfileSpec`.
 	- [ ] Validate and write out spec file.
 - [ ] Implement `idse compile agent-spec --session <id>` CLI command.
-- [ ] Document integration with PromptBraining / Agency Core.
+- [ ] Document integration with PromptBraining / Artifact Core.
 
 ## 7. Governance & Spine alignment
 

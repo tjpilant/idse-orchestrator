@@ -14,7 +14,7 @@ Architecture:
 """
 
 __version__ = "0.1.0"
-__author__ = "IDSE Developer Agency"
+__author__ = "TjPilant IM Unlimited LLC"
 __license__ = "MIT"
 
 # Public API

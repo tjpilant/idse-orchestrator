@@ -6,7 +6,7 @@ The IDSE Orchestrator was extracted from the idse-developer-agency monorepo to b
 
 ## 1. Ecosystem Context
 
-**Layer 1 – Agency Core**
+**Layer 1 – Artifact Core**
 - Multi-tenant backend
 - Hosts global Product Spines (PromptBraining, IDSE Orchestrator, etc.)
 - Provides MCP / HTTP APIs for sync
@@ -22,7 +22,7 @@ The IDSE Orchestrator was extracted from the idse-developer-agency monorepo to b
 - Called from editor or CI workflows
 - Operate on code and docs based on Orchestrator/Agency context
 
-**The Orchestrator must sit cleanly between Agency Core and IDE Agents without collapsing into either.**
+**The Orchestrator must sit cleanly between Artifact Core and IDE Agents without collapsing into either.**
 
 ## 2. Product Spine (Orchestrator Primitives)
 
@@ -45,8 +45,8 @@ The Orchestrator Product Spine currently defines these primitives:
 - DesignStoreFilesystem (default impl)
 
 **Sync:**
-- AgencySyncEngine
-- AgencyConfig
+- ArtifactSyncEngine
+- ArtifactConfig
 
 **Coordination:**
 - AgentRegistry
@@ -81,11 +81,11 @@ The Orchestrator Product Spine currently defines these primitives:
 
 **Depends on:**
 - A local filesystem (minimum viable DesignStoreFilesystem)
-- Network access to Agency Core for sync
+- Network access to Artifact Core for sync
 
 **Integrates with:**
 - IDE environments via AgentRegistry and IDEAgentRouting
-- PromptBraining / Agency Core via DocToAgentProfileSpecCompiler outputs
+- PromptBraining / Artifact Core via DocToAgentProfileSpecCompiler outputs
 
 ## Technical Context
 

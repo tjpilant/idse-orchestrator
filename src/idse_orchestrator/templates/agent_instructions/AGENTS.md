@@ -64,7 +64,7 @@ idse status --project {project_name}
 # Validate before syncing
 idse validate --project {project_name}
 
-# Sync to Agency Core
+# Sync to Artifact Core
 idse sync push --project {project_name}
 ```
 

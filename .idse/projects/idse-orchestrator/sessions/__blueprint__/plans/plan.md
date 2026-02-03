@@ -57,18 +57,18 @@ Scope: `ValidationEngine`, `ConstitutionRules`.
 
 ### Phase 3 – Agency Sync
 
-Scope: `DesignStore` maturation, `SyncEngine`, `AgencyConfig`.
+Scope: `DesignStore` maturation, `SyncEngine`, `ArtifactConfig`.
 
 - Implement:
 	- `DesignStoreFilesystem` as the canonical storage backend.
-	- `AgencyConfig` (config file + env vars).
+	- `ArtifactConfig` (config file + env vars).
 	- `idse sync push` / `idse sync pull`:
 		- Upload/download pipeline artifacts & state.
 		- Update `last_sync`.
-- Design payload format and minimal sync protocol with Agency Core.
+- Design payload format and minimal sync protocol with Artifact Core.
 
 **Exit criteria:**
-- A project's IDSE artifacts can be mirrored into Agency Core and back.
+- A project's IDSE artifacts can be mirrored into Artifact Core and back.
 - Conflicts are at least visible (manual resolution is acceptable for MVP).
 
 ---
@@ -102,7 +102,7 @@ Scope: `DocToAgentProfileSpecCompiler`.
 
 **Exit criteria:**
 - Given a filled-out `spec.md`, Orchestrator can produce a valid `AgentProfileSpec`.
-- PromptBraining / Agency Core can consume that spec without special casing.
+- PromptBraining / Artifact Core can consume that spec without special casing.
 
 ---
 

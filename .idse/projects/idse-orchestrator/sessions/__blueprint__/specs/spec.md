@@ -11,7 +11,7 @@ The IDSE Orchestrator **MUST**:
 - Track pipeline state (StageStateModel) across sessions
 - Enforce IDSE Constitution rules via a ValidationEngine
 - Provide a storage abstraction (DesignStore) with at least filesystem support
-- Sync artifacts with Agency Core via an AgencySyncEngine
+- Sync artifacts with Artifact Core via an ArtifactSyncEngine
 - Coordinate IDE agents via an AgentRegistry and IDEAgentRouting
 - Compile `spec.md` → AgentProfileSpec via DocToAgentProfileSpecCompiler
 - Expose a coherent CLI interface for all of the above
@@ -84,7 +84,7 @@ exist (created from templates if needed).
 
 **MUST** allow future implementations (Notion, Supabase, Firebase, Obsidian) without changing core logic.
 
-### 2.7 AgencySyncEngine + AgencyConfig
+### 2.7 ArtifactSyncEngine + ArtifactConfig
 
 **MUST** implement:
 - `idse sync push`
@@ -146,7 +146,7 @@ exist (created from templates if needed).
 - Must work on Linux/macOS dev environments
 
 **Safety:**
-- Must not leak client artifacts outside configured Agency Core endpoints
+- Must not leak client artifacts outside configured Artifact Core endpoints
 - Must not run unreviewed code or tools by default
 
 **Extensibility:**
@@ -165,7 +165,7 @@ exist (created from templates if needed).
 | 5 | StageStateModel | stage_state_model.py | Core Loop | Sync | Concept | Primitive |
 | 6 | DocToAgentProfileSpecCompiler | compiler/ | Core Loop | Compilation | Concept | Primitive |
 | 7 | DesignStore | design_store.py | Platform | Storage | Concept | Primitive |
-| 8 | AgencySyncEngine | (TBD) | Platform | Sync | Concept | Primitive |
+| 8 | ArtifactSyncEngine | (TBD) | Platform | Sync | Concept | Primitive |
 | 9 | IDEAgentRouting | ide_agent_routing.py | Platform | Coordination | Concept | Primitive |
 | 10 | AgentRegistry | agent_registry.py | Platform | Coordination | Concept | Primitive |
 | 11 | CLIInterface | cli.py | Platform | CLI | Concept | Primitive |

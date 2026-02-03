@@ -43,9 +43,9 @@ The canonical locations for pipeline artifacts are now **projects-rooted**:
 - Stages (subdirectories under each session): `intents/`, `contexts/`, `specs/`, `plans/`, `tasks/`, `implementation/`, `feedback/`
 
 **Clarification on `implementation/`:**
-- For **IDSE Agency sessions**: Contains validation reports, code examples (in markdown), handoff records, and references to actual code locations
+- For **IDSE Orchestrator sessions**: Contains validation reports, code examples (in markdown), handoff records, and references to actual code locations
 - **NOT** for production code - actual executable code lives in the repository's codebase directories (src/, backend/, frontend/, etc.)
-- The IDSE Agency produces **documentation** that the IDE/development team uses to create actual code
+- The IDSE Orchestrator produces **documentation** that the IDE/development team uses to create actual code
 
 Legacy stage-rooted paths (`<stage>/projects/<project>/sessions/<session-id>/...`) are supported only during the grace period defined in Section 6 for backward compatibility and must be flagged by validators when encountered.
 

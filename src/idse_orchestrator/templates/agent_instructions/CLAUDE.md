@@ -62,7 +62,7 @@ idse status --project {project_name}
 
 ### Validation
 
-Before syncing to Agency Core:
+Before syncing to Artifact Core:
 ```bash
 idse validate --project {project_name}
 ```

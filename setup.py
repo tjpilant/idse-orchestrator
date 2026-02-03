@@ -18,7 +18,7 @@ requirements = (
 setup(
     name="idse-orchestrator",
     version="0.1.0",
-    author="IDSE Developer Agency",
+    author="TjPilant IM Unlimited LLC",
     author_email="noreply@idse-agency.dev",
     description="CLI tool for managing Intent-Driven Systems Engineering (IDSE) projects",
     long_description=long_description,

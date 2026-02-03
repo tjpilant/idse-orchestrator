@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.8"
 license = {text = "MIT"}
 authors = [
-    {name = "IDSE Developer Agency", email = "noreply@idse-agency.dev"}
+    {name = "TjPilant IM Unlimited LLC", email = "noreply@idse-agency.dev"}
 ]
 keywords = ["idse", "development", "pipeline", "orchestration", "cli"]
 classifiers = [
