@@ -4,6 +4,12 @@
 
 This project uses **Intent-Driven Development (IDD)** via IDSE.
 
+## Planning Mode Override
+
+If you are running in **planning mode**, ignore implementation-only directives below.
+In planning mode, you should only update Intent/Context/Spec/Plan/Tasks and request
+a handoff for implementation.
+
 ### Before Writing ANY Code
 
 **MANDATORY WORKFLOW:**
