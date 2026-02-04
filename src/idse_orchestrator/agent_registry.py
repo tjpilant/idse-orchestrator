@@ -10,7 +10,7 @@ class AgentRegistry:
 
     def __init__(self, registry_path: Optional[Path] = None):
         if registry_path is None:
-            registry_path = Path(__file__).parent.parent / "config" / "agent_registry.json"
+            registry_path = _default_registry_path()
         self.registry_path = registry_path
         self._registry = self._load()
 
@@ -35,16 +35,21 @@ class AgentRegistry:
 
     def _load(self) -> Dict:
         if not self.registry_path.exists():
-            return {
+            default = {
                 "agents": [
                     {
                         "id": "claude-code",
                         "role": "orchestrator",
-                        "stages": ["intent", "context", "spec", "plan", "tasks"],
+                        "stages": ["intent", "context", "spec", "plan", "tasks", "feedback"],
                     },
                     {"id": "gpt-codex", "role": "implementer", "stages": ["implementation"]},
                 ]
             }
+            # Persist defaults for project-level registries
+            if "projects" in self.registry_path.parts:
+                self._registry = default
+                self._persist()
+            return default
 
         with self.registry_path.open("r") as f:
             return json.load(f)
@@ -53,3 +58,17 @@ class AgentRegistry:
         self.registry_path.parent.mkdir(parents=True, exist_ok=True)
         with self.registry_path.open("w") as f:
             json.dump(self._registry, f, indent=2)
+
+
+def _default_registry_path() -> Path:
+    try:
+        from .project_workspace import ProjectWorkspace
+
+        manager = ProjectWorkspace()
+        project_path = manager.get_current_project()
+        if project_path:
+            return project_path / "agent_registry.json"
+    except Exception:
+        pass
+
+    return Path(__file__).parent.parent / "config" / "agent_registry.json"

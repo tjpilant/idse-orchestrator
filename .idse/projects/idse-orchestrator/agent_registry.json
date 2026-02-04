@@ -1,0 +1,14 @@
+{
+  "agents": [
+    {
+      "id": "claude-code",
+      "role": "orchestrator",
+      "stages": ["intent", "context", "spec", "plan", "tasks", "feedback"]
+    },
+    {
+      "id": "gpt-codex",
+      "role": "implementer",
+      "stages": ["implementation"]
+    }
+  ]
+}
