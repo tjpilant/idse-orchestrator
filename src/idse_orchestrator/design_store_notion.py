@@ -22,6 +22,7 @@ class NotionDesignStore(MCPDesignStoreAdapter):
 
     DEFAULT_PROPERTIES = {
         "title": {"name": "Title", "type": "title"},
+        "idse_id": {"name": "IDSE_ID", "type": "rich_text"},
         "project": {"name": "Project", "type": "rich_text"},
         "session": {"name": "Session", "type": "rich_text"},
         "stage": {"name": "Stage", "type": "select"},
@@ -89,6 +90,9 @@ class NotionDesignStore(MCPDesignStoreAdapter):
         title_prop = self.properties.get("title")
         title_value = f"{stage.title()} – {project} – {session_id}"
         properties = {
+            self.properties["idse_id"]["name"]: self._property_value(
+                "idse_id", _make_idse_id(project, session_id, stage)
+            ),
             self.properties["project"]["name"]: self._property_value("project", project),
             self.properties["session"]["name"]: self._property_value("session", session_id),
             self.properties["stage"]["name"]: self._property_value(
@@ -296,9 +300,9 @@ class NotionDesignStore(MCPDesignStoreAdapter):
         self, project: str, session_id: str, stage: str
     ) -> Optional[Dict[str, Any]]:
         filters = [
-            self._property_filter("project", project),
-            self._property_filter("session", session_id),
-            self._property_filter("stage", stage),
+            self._property_filter(
+                "idse_id", _make_idse_id(project, session_id, stage)
+            )
         ]
         results = self._query_database(filters)
         return results[0] if results else None
@@ -552,6 +556,10 @@ def _format_stage_value(stage: str) -> str:
         "feedback": "Feedback",
     }
     return mapping.get(stage, stage)
+
+
+def _make_idse_id(project: str, session_id: str, stage: str) -> str:
+    return f"{project}::{session_id}::{stage}"
 
 
 def _debug_payload(tool_name: str, payload: Dict[str, Any]) -> None:

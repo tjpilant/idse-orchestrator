@@ -131,10 +131,12 @@ To use Notion as the Artifact Core backend, create an "IDSE Artifacts" database 
       "append_children": "append_block_children"
     },
     "properties": {
+      "idse_id": { "name": "IDSE_ID", "type": "text" },
+      "title": { "name": "Title", "type": "title" },
       "project": { "name": "Project", "type": "text" },
       "session": { "name": "Session", "type": "text" },
       "stage": { "name": "Stage", "type": "select" },
-      "content": { "name": "page_body", "type": "page_body" }
+      "content": { "name": "body", "type": "page_body" }
     }
   }
 }

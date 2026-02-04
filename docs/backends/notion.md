@@ -14,7 +14,9 @@ Create a database named **IDSE Artifacts** with properties:
 - **Project** (rich_text)
 - **Session** (rich_text)
 - **Stage** (select)
-- **Content** (rich_text)
+- **IDSE_ID** (rich_text)
+- **Title** (title)
+- **Body** (page body content)
 
 Stages should align with IDSE stages (intent, context, spec, plan, tasks, implementation, feedback).
 
@@ -40,10 +42,12 @@ Add to `~/.idseconfig.json`:
       "append_children": "append_block_children"
     },
     "properties": {
+      "idse_id": { "name": "IDSE_ID", "type": "text" },
+      "title": { "name": "Title", "type": "title" },
       "project": { "name": "Project", "type": "text" },
       "session": { "name": "Session", "type": "text" },
       "stage": { "name": "Stage", "type": "select" },
-      "content": { "name": "page_body", "type": "page_body" }
+      "content": { "name": "body", "type": "page_body" }
     }
   }
 }
