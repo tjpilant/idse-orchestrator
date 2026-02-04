@@ -160,16 +160,25 @@ def validate(ctx, project: Optional[str]):
 
 
 @main.group()
-def sync():
-    """Sync pipeline artifacts via DesignStore."""
-    pass
+@click.option(
+    "--config",
+    "config_path",
+    type=click.Path(dir_okay=False, path_type=Path),
+    help="Path to .idseconfig.json (defaults to ~/.idseconfig.json)",
+)
+@click.pass_context
+def sync(ctx, config_path: Optional[Path]):
+    """Sync pipeline artifacts via configured DesignStore backends."""
+    ctx.obj["config_path"] = config_path
 
 
 @sync.command()
 @click.option("--project", help="Project name (uses current if not specified)")
 @click.option("--session", "session_override", help="Session ID (uses CURRENT_SESSION if not specified)")
+@click.option("--yes", is_flag=True, help="Skip overwrite confirmation")
+@click.option("--debug", is_flag=True, help="Print MCP payloads")
 @click.pass_context
-def push(ctx, project: Optional[str], session_override: Optional[str]):
+def push(ctx, project: Optional[str], session_override: Optional[str], yes: bool, debug: bool):
     """
     Write pipeline artifacts through the DesignStore.
 
@@ -181,6 +190,7 @@ def push(ctx, project: Optional[str], session_override: Optional[str]):
         idse sync push --project customer-portal
     """
     from .project_workspace import ProjectWorkspace
+    from .artifact_config import ArtifactConfig
     from .design_store import DesignStoreFilesystem
     from .stage_state_model import StageStateModel
     from .session_graph import SessionGraph
@@ -213,11 +223,23 @@ def push(ctx, project: Optional[str], session_override: Optional[str]):
             if path.exists():
                 artifacts[stage] = path.read_text()
 
-        store = DesignStoreFilesystem(manager.idse_root)
+        config = ArtifactConfig(ctx.obj.get("config_path"))
+        remote_store = config.get_design_store(manager.idse_root)
+        if debug and hasattr(remote_store, "set_debug"):
+            remote_store.set_debug(True)
         tracker = StageStateModel(project_path)
 
+        if not yes and not click.confirm(
+            f"Overwrite remote artifacts for {project_name}/{session_id}?"
+        ):
+            click.echo("ℹ️  Sync push cancelled.")
+            return
+
         click.echo(f"📤 Syncing artifacts for {project_name}/{session_id}...")
-        pushed = store.push_artifacts(project_name, session_id, artifacts)
+        pushed = []
+        for stage, content in artifacts.items():
+            remote_store.save_artifact(project_name, session_id, stage, content)
+            pushed.append(stage)
         tracker.mark_synced()
 
         click.echo(f"✅ Synced {len(pushed)} stages")
@@ -232,8 +254,9 @@ def push(ctx, project: Optional[str], session_override: Optional[str]):
 @sync.command()
 @click.option("--project", help="Project name (uses current if not specified)")
 @click.option("--session", "session_override", help="Session ID (uses CURRENT_SESSION if not specified)")
+@click.option("--yes", is_flag=True, help="Skip overwrite confirmation")
 @click.pass_context
-def pull(ctx, project: Optional[str], session_override: Optional[str]):
+def pull(ctx, project: Optional[str], session_override: Optional[str], yes: bool):
     """
     Read pipeline artifacts from the DesignStore.
 
@@ -244,6 +267,7 @@ def pull(ctx, project: Optional[str], session_override: Optional[str]):
         idse sync pull --session __blueprint__
     """
     from .project_workspace import ProjectWorkspace
+    from .artifact_config import ArtifactConfig
     from .design_store import DesignStoreFilesystem
     from .stage_state_model import StageStateModel
     from .session_graph import SessionGraph
@@ -261,11 +285,26 @@ def pull(ctx, project: Optional[str], session_override: Optional[str]):
         project_name = project_path.name
         session_id = session_override or SessionGraph(project_path).get_current_session()
 
-        store = DesignStoreFilesystem(manager.idse_root)
+        local_store = DesignStoreFilesystem(manager.idse_root)
+        config = ArtifactConfig(ctx.obj.get("config_path"))
+        remote_store = config.get_design_store(manager.idse_root)
         tracker = StageStateModel(project_path)
 
+        if not yes and not click.confirm(
+            f"Overwrite local artifacts for {project_name}/{session_id}?"
+        ):
+            click.echo("ℹ️  Sync pull cancelled.")
+            return
+
         click.echo(f"📥 Pulling artifacts for {project_name}/{session_id}...")
-        artifacts = store.pull_artifacts(project_name, session_id)
+        artifacts = {}
+        for stage in DesignStoreFilesystem.STAGE_PATHS.keys():
+            try:
+                artifacts[stage] = remote_store.load_artifact(project_name, session_id, stage)
+            except FileNotFoundError:
+                continue
+        for stage, content in artifacts.items():
+            local_store.save_artifact(project_name, session_id, stage, content)
         tracker.mark_synced()
 
         click.echo(f"✅ Retrieved {len(artifacts)} stage artifacts")
@@ -275,6 +314,180 @@ def pull(ctx, project: Optional[str], session_override: Optional[str]):
     except Exception as e:
         click.echo(f"❌ Error: {e}", err=True)
         sys.exit(1)
+
+
+@sync.command()
+@click.pass_context
+def setup(ctx):
+    """Configure Artifact Core backend for sync."""
+    from .artifact_config import ArtifactConfig
+
+    config = ArtifactConfig(ctx.obj.get("config_path"))
+
+    backend = click.prompt(
+        "Artifact backend", type=click.Choice(["filesystem", "notion"]), default="filesystem"
+    )
+    config.config["artifact_backend"] = backend
+
+    if backend == "filesystem":
+        base_path = click.prompt(
+            "Base path for filesystem backend",
+            default="",
+            show_default=False,
+        )
+        if base_path:
+            config.config["base_path"] = base_path
+
+    if backend == "notion":
+        database_id = click.prompt("Notion database ID")
+        credentials_dir = click.prompt(
+            "Credentials directory",
+            default=str(Path.cwd() / "mnt" / "mcp_credentials"),
+        )
+        config.config["notion"] = {
+            "database_id": database_id,
+            "credentials_dir": credentials_dir,
+        }
+
+    config.save()
+    click.echo(f"✅ Saved config to {config.config_path}")
+
+
+@sync.command()
+@click.option("--project", help="Project name (uses current if not specified)")
+@click.pass_context
+def status(ctx, project: Optional[str]):
+    """Show sync backend and last sync timestamp."""
+    from .artifact_config import ArtifactConfig
+    from .project_workspace import ProjectWorkspace
+    from .stage_state_model import StageStateModel
+
+    config = ArtifactConfig(ctx.obj.get("config_path"))
+    backend = config.get_backend()
+
+    manager = ProjectWorkspace()
+    project_path = manager.projects_root / project if project else manager.get_current_project()
+    if not project_path:
+        click.echo("❌ Error: No IDSE project found", err=True)
+        sys.exit(1)
+
+    tracker = StageStateModel(project_path)
+    state = tracker.get_status()
+    click.echo("🔗 Sync Status")
+    click.echo(f"Backend: {backend}")
+    click.echo(f"Last Sync: {state.get('last_sync', 'Never')}")
+
+
+@sync.command()
+@click.pass_context
+def test(ctx):
+    """Validate sync backend connectivity and schema."""
+    from .artifact_config import ArtifactConfig
+    from .project_workspace import ProjectWorkspace
+
+    config_path = ctx.obj.get("config_path")
+    config = ArtifactConfig(config_path)
+    backend = config.get_backend()
+
+    click.echo("🧪 Sync Backend Test")
+    click.echo(f"Backend: {backend}")
+    click.echo(f"Config: {config.config_path}")
+
+    if backend == "filesystem":
+        manager = ProjectWorkspace()
+        idse_root = manager.idse_root
+        if not idse_root.exists():
+            click.echo("❌ Filesystem backend not found: .idse missing", err=True)
+            sys.exit(1)
+        click.echo(f"✅ Filesystem backend available at {idse_root}")
+        return
+
+    try:
+        store = config.get_design_store()
+        validate = getattr(store, "validate_backend", None)
+        if not callable(validate):
+            click.echo("⚠️  Backend does not provide validation.")
+            return
+        if backend == "notion":
+            notion_cfg = config.config.get("notion", {})
+            tool_names = notion_cfg.get("tool_names")
+            if tool_names:
+                click.echo(f"Tool Names: {tool_names}")
+        result = validate()
+        if result.get("checks"):
+            for check in result["checks"]:
+                click.echo(f"   ✓ {check}")
+        if result.get("warnings"):
+            for warning in result["warnings"]:
+                click.echo(f"   ! {warning}")
+        click.echo("✅ Backend validation complete")
+    except Exception as e:
+        click.echo(f"❌ Backend validation failed: {e}", err=True)
+        sys.exit(1)
+
+
+@sync.command()
+@click.option("--schema", "show_schema", is_flag=True, help="Show tool input schemas")
+@click.pass_context
+def tools(ctx, show_schema: bool):
+    """List MCP tools available for the configured backend."""
+    from .artifact_config import ArtifactConfig
+
+    config = ArtifactConfig(ctx.obj.get("config_path"))
+    backend = config.get_backend()
+
+    click.echo("🧰 Sync Backend Tools")
+    click.echo(f"Backend: {backend}")
+
+    if backend == "filesystem":
+        click.echo("Filesystem backend has no MCP tools.")
+        return
+
+    store = config.get_design_store()
+    if not hasattr(store, "list_tools"):
+        click.echo("Backend does not expose MCP tools.")
+        return
+
+    tools = store.list_tools()
+    tool_list = getattr(tools, "tools", []) if tools else []
+    if not tool_list:
+        click.echo("No tools returned.")
+        return
+
+    for tool in tool_list:
+        click.echo(f" - {tool.name}")
+        if show_schema and getattr(tool, "inputSchema", None):
+            import json
+
+            click.echo(json.dumps(tool.inputSchema, indent=2))
+
+
+@sync.command()
+@click.pass_context
+def describe(ctx):
+    """Describe the backend by dumping raw MCP query response."""
+    from .artifact_config import ArtifactConfig
+
+    config = ArtifactConfig(ctx.obj.get("config_path"))
+    backend = config.get_backend()
+
+    click.echo("🧾 Backend Description")
+    click.echo(f"Backend: {backend}")
+
+    if backend == "filesystem":
+        click.echo("Filesystem backend has no remote metadata.")
+        return
+
+    store = config.get_design_store()
+    describe = getattr(store, "describe_backend", None)
+    if not callable(describe):
+        click.echo("Backend does not support describe.")
+        return
+
+    data = describe()
+    import json
+
+    click.echo(json.dumps(data, indent=2))
 
 
 @main.group()

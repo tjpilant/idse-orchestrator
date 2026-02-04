@@ -99,6 +99,60 @@ Create `~/.idseconfig.json`:
 }
 ```
 
+## Sync Backends
+
+The orchestrator can sync artifacts via configured storage backends.
+
+### Configure Sync
+
+```bash
+idse sync setup
+```
+
+### Notion Backend (MCP)
+
+To use Notion as the Artifact Core backend, create an "IDSE Artifacts" database and configure:
+
+```json
+{
+  "artifact_backend": "notion",
+  "notion": {
+    "database_id": "your-notion-database-id",
+    "database_view_id": "optional-database-view-id",
+    "database_view_url": "optional-database-view-url",
+    "parent_data_source_url": "collection://your-data-source-id",
+    "data_source_id": "your-data-source-id",
+    "credentials_dir": "./mnt/mcp_credentials",
+    "tool_names": {
+      "query_database": "notion-query-database-view",
+      "create_page": "notion-create-pages",
+      "update_page": "notion-update-page",
+      "fetch_page": "notion-fetch",
+      "append_children": "append_block_children"
+    },
+    "properties": {
+      "project": { "name": "Project", "type": "text" },
+      "session": { "name": "Session", "type": "text" },
+      "stage": { "name": "Stage", "type": "select" },
+      "content": { "name": "page_body", "type": "page_body" }
+    }
+  }
+}
+```
+
+Then run:
+
+```bash
+idse sync push
+idse sync pull
+idse sync status
+idse sync test
+idse sync tools
+```
+
+Stage values are normalized to Title Case (`Intent`, `Context`, `Specification`,
+`Plan`, `Tasks`, `Test Plan`, `Feedback`) to match Notion select options.
+
 ## Commands
 
 ### `idse init <project-name>`
