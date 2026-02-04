@@ -50,6 +50,7 @@ class NotionDesignStore(MCPDesignStoreAdapter):
         self.parent_data_source_url = parent_data_source_url
         self.data_source_id = data_source_id
         self.debug = False
+        self.use_idse_id = True
         self.tool_names = {**self.DEFAULT_TOOL_NAMES, **(tool_names or {})}
         self.properties = self._normalize_properties(
             {**self.DEFAULT_PROPERTIES, **(properties or {})}
@@ -90,15 +91,16 @@ class NotionDesignStore(MCPDesignStoreAdapter):
         title_prop = self.properties.get("title")
         title_value = f"{stage.title()} – {project} – {session_id}"
         properties = {
-            self.properties["idse_id"]["name"]: self._property_value(
-                "idse_id", _make_idse_id(project, session_id, stage)
-            ),
             self.properties["project"]["name"]: self._property_value("project", project),
             self.properties["session"]["name"]: self._property_value("session", session_id),
             self.properties["stage"]["name"]: self._property_value(
                 "stage", _format_stage_value(stage)
             ),
         }
+        if self.use_idse_id:
+            properties[self.properties["idse_id"]["name"]] = self._property_value(
+                "idse_id", _make_idse_id(project, session_id, stage)
+            )
         if title_prop:
             properties[title_prop["name"]] = self._property_value("title", title_value)
         if self._content_type() != "page_body":
@@ -124,8 +126,9 @@ class NotionDesignStore(MCPDesignStoreAdapter):
                     _debug_payload(self.tool_names["update_page"], payload_props)
                 try:
                     result = self._call_tool(self.tool_names["update_page"], payload_props)
-                except RuntimeError as exc:
+                except Exception as exc:
                     if "Property \"IDSE_ID\" not found" in str(exc):
+                        self.use_idse_id = False
                         flat_props_no_id = _drop_idse_id(flat_properties, self.properties)
                         payload_props["data"]["properties"] = flat_props_no_id
                         result = self._call_tool(self.tool_names["update_page"], payload_props)
@@ -159,8 +162,9 @@ class NotionDesignStore(MCPDesignStoreAdapter):
                 _debug_payload(create_tool, payload)
             try:
                 new_page = self._call_tool(create_tool, payload)
-            except RuntimeError as exc:
+            except Exception as exc:
                 if "Property \"IDSE_ID\" not found" in str(exc):
+                    self.use_idse_id = False
                     payload["properties"] = _drop_idse_id(properties, self.properties)
                     new_page = self._call_tool(create_tool, payload)
                 else:
@@ -199,8 +203,9 @@ class NotionDesignStore(MCPDesignStoreAdapter):
                 _debug_payload(create_tool, payload)
             try:
                 result = self._call_tool(create_tool, payload)
-            except RuntimeError as exc:
+            except Exception as exc:
                 if "Property \"IDSE_ID\" not found" in str(exc):
+                    self.use_idse_id = False
                     payload["pages"][0]["properties"] = _drop_idse_id(
                         payload["pages"][0]["properties"], self.properties
                     )
@@ -330,10 +335,12 @@ class NotionDesignStore(MCPDesignStoreAdapter):
         ]
         try:
             results = self._query_database(filters)
-        except RuntimeError as exc:
-            if "IDSE_ID" not in str(exc):
+        except Exception as exc:
+            if "IDSE_ID" in str(exc):
+                self.use_idse_id = False
+                results = []
+            else:
                 raise
-            results = []
         if results:
             return results[0]
         fallback_filters = [
