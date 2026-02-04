@@ -32,6 +32,7 @@ def test_validation_engine_sqlite_backend(tmp_path: Path) -> None:
         db.save_artifact(project, session_id, "tasks", "## Phase\nTest\n")
         db.save_artifact(project, session_id, "feedback", "## Feedback\nTest\n")
         db.save_session_state(project, session_id, {"project_name": project, "session_id": session_id, "stages": {}})
+        db.set_current_session(project, session_id)
 
         results = ValidationEngine().validate_project(project)
         assert results["valid"] is True

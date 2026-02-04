@@ -14,8 +14,9 @@ class ArtifactConfig:
 
     DEFAULT_PATH = Path.home() / ".idseconfig.json"
 
-    def __init__(self, config_path: Optional[Path] = None):
+    def __init__(self, config_path: Optional[Path] = None, backend_override: Optional[str] = None):
         self.config_path = config_path or self.DEFAULT_PATH
+        self.backend_override = backend_override
         self.config = self._load()
 
     def _load(self) -> Dict[str, Any]:
@@ -37,6 +38,9 @@ class ArtifactConfig:
             json.dump(self.config, f, indent=2)
 
     def get_backend(self) -> str:
+        if self.backend_override:
+            return self.backend_override
+
         return (
             self.config.get("artifact_backend")
             or self.config.get("backend")
@@ -65,7 +69,22 @@ class ArtifactConfig:
             db_path = Path(db_path_value) if db_path_value else None
             idse_root_path = Path(idse_root_value) if idse_root_value else idse_root
 
-            return DesignStoreSQLite(db_path=db_path, idse_root=idse_root_path)
+            if not idse_root_path and not db_path:
+                raise ValueError("SQLite backend requires idse_root or db_path.")
+            if not idse_root_path and db_path:
+                idse_root_path = db_path.parent
+            db_path_final = db_path or (Path(idse_root_path) / "idse.db")
+            if not db_path_final.exists():
+                legacy = (Path(idse_root_path) / "projects").exists()
+                if legacy:
+                    raise FileNotFoundError(
+                        "Legacy project detected. Run 'idse migrate' to convert to SQLite."
+                    )
+                raise FileNotFoundError(
+                    "Database not found. Run 'idse init' or 'idse migrate'."
+                )
+
+            return DesignStoreSQLite(db_path=db_path_final, idse_root=idse_root_path)
 
         if backend == "notion":
             notion_config = self.config.get("notion", {})

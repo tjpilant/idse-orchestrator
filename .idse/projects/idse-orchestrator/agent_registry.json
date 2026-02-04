@@ -4,19 +4,31 @@
       "id": "claude-code",
       "role": "orchestrator",
       "mode": "planning",
-      "stages": ["intent", "context", "spec", "plan", "tasks", "feedback"]
-    },
-    {
-      "id": "gpt-codex",
-      "role": "implementer",
-      "mode": "implementation",
-      "stages": ["implementation"]
+      "stages": [
+        "context",
+        "feedback",
+        "intent",
+        "plan",
+        "spec",
+        "tasks"
+      ]
     },
     {
       "id": "github-copilot",
       "role": "implementer",
       "mode": "implementation",
-      "stages": ["implementation", "feedback"]
+      "stages": [
+        "feedback",
+        "implementation"
+      ]
+    },
+    {
+      "id": "gpt-codex",
+      "role": "implementer",
+      "mode": "implementation",
+      "stages": [
+        "implementation"
+      ]
     }
   ]
 }

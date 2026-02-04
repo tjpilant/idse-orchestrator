@@ -16,7 +16,7 @@ from .constitution_rules import REQUIRED_SECTIONS
 class ValidationEngine:
     """Validates IDSE artifacts against constitutional rules."""
 
-    def validate_project(self, project_name: Optional[str] = None) -> Dict:
+    def validate_project(self, project_name: Optional[str] = None, backend_override: Optional[str] = None) -> Dict:
         """
         Validate an IDSE project's pipeline artifacts.
 
@@ -63,10 +63,10 @@ class ValidationEngine:
         session_path = project_path / "sessions" / session_id
         project_name = project_path.name
 
-        config = ArtifactConfig()
+        config = ArtifactConfig(backend_override=backend_override)
         backend = config.get_backend()
         use_db = backend == "sqlite"
-        db = ArtifactDatabase(idse_root=manager.idse_root) if use_db else None
+        db = ArtifactDatabase(idse_root=manager.idse_root, allow_create=False) if use_db else None
 
         checks: List[str] = []
         errors: List[str] = []
@@ -149,8 +149,9 @@ class ValidationEngine:
         try:
             if use_db:
                 tracker = StageStateModel(
-                    store=DesignStoreSQLite(idse_root=manager.idse_root),
+                    store=DesignStoreSQLite(idse_root=manager.idse_root, allow_create=False),
                     project_name=project_name,
+                    session_id=session_id,
                 )
             else:
                 tracker = StageStateModel(project_path)

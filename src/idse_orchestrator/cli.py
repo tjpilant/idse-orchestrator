@@ -20,8 +20,13 @@ from . import __version__
 
 @click.group()
 @click.version_option(version=__version__, prog_name="idse")
+@click.option(
+    "--backend",
+    type=click.Choice(["sqlite", "filesystem", "notion"], case_sensitive=False),
+    help="Override artifact backend for this command.",
+)
 @click.pass_context
-def main(ctx):
+def main(ctx, backend: Optional[str]):
     """
     IDSE Developer Orchestrator
 
@@ -30,6 +35,8 @@ def main(ctx):
     """
     # Ensure context object exists
     ctx.ensure_object(dict)
+    if backend:
+        ctx.obj["backend_override"] = backend.lower()
 
 
 @main.command()
@@ -74,7 +81,12 @@ def init(ctx, project_name: str, stack: str, guided: bool, agentic: Optional[str
             config.save()
 
         manager = ProjectWorkspace()
-        project_path = manager.init_project(project_name, stack, create_agent_files=create_agent_files)
+        project_path = manager.init_project(
+            project_name,
+            stack,
+            create_agent_files=create_agent_files,
+            backend=backend,
+        )
 
         # Run guided setup if requested
         if guided:
@@ -154,7 +166,7 @@ def validate(ctx, project: Optional[str]):
 
     try:
         validator = ValidationEngine()
-        results = validator.validate_project(project)
+        results = validator.validate_project(project, backend_override=ctx.obj.get("backend_override"))
 
         if results["valid"]:
             click.echo("✅ Validation passed!")
@@ -198,7 +210,7 @@ def export(ctx, project: Optional[str], session_id: Optional[str], all_sessions:
     from .project_workspace import ProjectWorkspace
     from .session_graph import SessionGraph
 
-    config = ArtifactConfig(config_path)
+    config = ArtifactConfig(config_path, backend_override=ctx.obj.get("backend_override"))
     backend = config.get_backend()
     if backend != "sqlite":
         click.echo("❌ Error: export requires sqlite backend (set artifact_backend=sqlite).", err=True)
@@ -228,11 +240,27 @@ def export(ctx, project: Optional[str], session_id: Optional[str], all_sessions:
     if all_sessions:
         results = generator.generate_project(project_name, stages=stage_list)
         total = sum(len(paths) for paths in results.values())
+        try:
+            from .artifact_database import ArtifactDatabase
+
+            current = ArtifactDatabase(idse_root=manager.idse_root, allow_create=False).get_current_session(project_name)
+            if current:
+                generator.generate_session_state(project_name, current)
+                generator.generate_agent_registry(project_name)
+            generator.generate_blueprint_meta(project_name)
+        except Exception:
+            pass
         click.echo(f"✅ Exported {total} artifacts for {len(results)} sessions in {project_name}")
         return
 
     session_id = session_id or SessionGraph(project_path).get_current_session()
     written = generator.generate_session(project_name, session_id, stages=stage_list)
+    try:
+        generator.generate_session_state(project_name, session_id)
+        generator.generate_agent_registry(project_name)
+        generator.generate_blueprint_meta(project_name)
+    except Exception:
+        pass
     click.echo(f"✅ Exported {len(written)} artifacts for {project_name}/{session_id}")
 
 
@@ -258,7 +286,7 @@ def migrate(ctx, project: Optional[str], sessions: Optional[str], config_path: O
     from .artifact_config import ArtifactConfig
     from .migration import FileToDatabaseMigrator
 
-    config = ArtifactConfig(config_path)
+    config = ArtifactConfig(config_path, backend_override=ctx.obj.get("backend_override"))
     backend = config.get_backend()
     if backend != "sqlite":
         click.echo("❌ Error: migrate requires sqlite backend (set artifact_backend=sqlite).", err=True)
@@ -306,7 +334,7 @@ def query(ctx, query_name: str, project: Optional[str], session_id: Optional[str
     from .artifact_database import ArtifactDatabase
     from .project_workspace import ProjectWorkspace
 
-    config = ArtifactConfig(config_path)
+    config = ArtifactConfig(config_path, backend_override=ctx.obj.get("backend_override"))
     if config.get_backend() != "sqlite":
         click.echo("❌ Error: query requires sqlite backend (set artifact_backend=sqlite).", err=True)
         sys.exit(1)
@@ -431,8 +459,11 @@ def push(ctx, project: Optional[str], session_override: Optional[str], yes: bool
         session_path = project_path / "sessions" / session_id
 
         artifacts = {}
-        use_db = (manager.idse_root / "idse.db").exists()
-        db = ArtifactDatabase(idse_root=manager.idse_root) if use_db else None
+        backend = ArtifactConfig(ctx.obj.get("config_path"), backend_override=ctx.obj.get("backend_override")).get_backend()
+        use_db = backend == "sqlite"
+        db = None
+        if use_db:
+            db = ArtifactDatabase(idse_root=manager.idse_root, allow_create=False)
         stage_paths = {
             "intent": session_path / "intents" / "intent.md",
             "context": session_path / "contexts" / "context.md",
@@ -453,7 +484,7 @@ def push(ctx, project: Optional[str], session_override: Optional[str], yes: bool
             if path.exists():
                 artifacts[stage] = path.read_text()
 
-        config = ArtifactConfig(ctx.obj.get("config_path"))
+        config = ArtifactConfig(ctx.obj.get("config_path"), backend_override=ctx.obj.get("backend_override"))
         remote_store = config.get_design_store(manager.idse_root)
         if debug and hasattr(remote_store, "set_debug"):
             remote_store.set_debug(True)
@@ -461,8 +492,9 @@ def push(ctx, project: Optional[str], session_override: Optional[str], yes: bool
             remote_store.set_force_create(True)
         if use_db:
             tracker = StageStateModel(
-                store=DesignStoreSQLite(idse_root=manager.idse_root),
+                store=DesignStoreSQLite(idse_root=manager.idse_root, allow_create=False),
                 project_name=project_name,
+                session_id=session_id,
             )
         else:
             tracker = StageStateModel(project_path)
@@ -538,15 +570,19 @@ def pull(ctx, project: Optional[str], session_override: Optional[str], yes: bool
         project_name = project_path.name
         session_id = session_override or SessionGraph(project_path).get_current_session()
 
-        use_db = (manager.idse_root / "idse.db").exists()
-        db = ArtifactDatabase(idse_root=manager.idse_root) if use_db else None
+        backend = ArtifactConfig(ctx.obj.get("config_path"), backend_override=ctx.obj.get("backend_override")).get_backend()
+        use_db = backend == "sqlite"
+        db = None
+        if use_db:
+            db = ArtifactDatabase(idse_root=manager.idse_root, allow_create=False)
         local_store = DesignStoreFilesystem(manager.idse_root)
-        config = ArtifactConfig(ctx.obj.get("config_path"))
+        config = ArtifactConfig(ctx.obj.get("config_path"), backend_override=ctx.obj.get("backend_override"))
         remote_store = config.get_design_store(manager.idse_root)
         if use_db:
             tracker = StageStateModel(
-                store=DesignStoreSQLite(idse_root=manager.idse_root),
+                store=DesignStoreSQLite(idse_root=manager.idse_root, allow_create=False),
                 project_name=project_name,
+                session_id=session_id,
             )
         else:
             tracker = StageStateModel(project_path)
@@ -580,9 +616,11 @@ def pull(ctx, project: Optional[str], session_override: Optional[str], yes: bool
         tracker.mark_synced()
 
         if use_db and changed_stages:
-            FileViewGenerator(idse_root=manager.idse_root).generate_session(
-                project_name, session_id, stages=changed_stages
-            )
+            generator = FileViewGenerator(idse_root=manager.idse_root, allow_create=False)
+            generator.generate_session(project_name, session_id, stages=changed_stages)
+            generator.generate_session_state(project_name, session_id)
+            generator.generate_agent_registry(project_name)
+            generator.generate_blueprint_meta(project_name)
 
         click.echo(f"✅ Retrieved {len(artifacts)} stage artifacts")
         for stage in artifacts:
@@ -599,7 +637,7 @@ def setup(ctx):
     """Configure Artifact Core backend for sync."""
     from .artifact_config import ArtifactConfig
 
-    config = ArtifactConfig(ctx.obj.get("config_path"))
+    config = ArtifactConfig(ctx.obj.get("config_path"), backend_override=ctx.obj.get("backend_override"))
 
     backend = click.prompt(
         "Artifact backend", type=click.Choice(["sqlite", "filesystem", "notion"]), default="sqlite"
@@ -646,7 +684,7 @@ def status(ctx, project: Optional[str]):
     from .project_workspace import ProjectWorkspace
     from .stage_state_model import StageStateModel
 
-    config = ArtifactConfig(ctx.obj.get("config_path"))
+    config = ArtifactConfig(ctx.obj.get("config_path"), backend_override=ctx.obj.get("backend_override"))
     backend = config.get_backend()
 
     manager = ProjectWorkspace()
@@ -670,7 +708,7 @@ def test(ctx):
     from .project_workspace import ProjectWorkspace
 
     config_path = ctx.obj.get("config_path")
-    config = ArtifactConfig(config_path)
+    config = ArtifactConfig(config_path, backend_override=ctx.obj.get("backend_override"))
     backend = config.get_backend()
 
     click.echo("🧪 Sync Backend Test")
@@ -717,7 +755,7 @@ def tools(ctx, show_schema: bool):
     """List MCP tools available for the configured backend."""
     from .artifact_config import ArtifactConfig
 
-    config = ArtifactConfig(ctx.obj.get("config_path"))
+    config = ArtifactConfig(ctx.obj.get("config_path"), backend_override=ctx.obj.get("backend_override"))
     backend = config.get_backend()
 
     click.echo("🧰 Sync Backend Tools")
@@ -752,7 +790,7 @@ def describe(ctx):
     """Describe the backend by dumping raw MCP query response."""
     from .artifact_config import ArtifactConfig
 
-    config = ArtifactConfig(ctx.obj.get("config_path"))
+    config = ArtifactConfig(ctx.obj.get("config_path"), backend_override=ctx.obj.get("backend_override"))
     backend = config.get_backend()
 
     click.echo("🧾 Backend Description")
@@ -772,6 +810,68 @@ def describe(ctx):
     import json
 
     click.echo(json.dumps(data, indent=2))
+
+
+@main.group()
+def artifact():
+    """Manage pipeline artifacts in the SQLite store."""
+    pass
+
+
+@artifact.command("write")
+@click.option("--project", help="Project name (uses current if not specified)")
+@click.option("--session", "session_id", help="Session ID (defaults to CURRENT_SESSION)")
+@click.option("--stage", required=True, help="Stage name (intent, context, spec, plan, tasks, implementation, feedback)")
+@click.option("--file", "file_path", type=click.Path(dir_okay=False, path_type=Path), help="Read content from file")
+@click.pass_context
+def artifact_write(ctx, project: Optional[str], session_id: Optional[str], stage: str, file_path: Optional[Path]):
+    """
+    Write an artifact into SQLite and regenerate its file view.
+
+    Example:
+        idse --backend sqlite artifact write --stage feedback < feedback.md
+        idse --backend sqlite artifact write --session my-session --stage plan --file plans/plan.md
+    """
+    from .artifact_config import ArtifactConfig
+    from .design_store import DesignStoreFilesystem
+    from .project_workspace import ProjectWorkspace
+    from .session_graph import SessionGraph
+
+    config = ArtifactConfig(
+        ctx.obj.get("config_path"),
+        backend_override=ctx.obj.get("backend_override"),
+    )
+    if config.get_backend() != "sqlite":
+        click.echo("❌ Error: artifact write requires sqlite backend.", err=True)
+        sys.exit(1)
+
+    manager = ProjectWorkspace()
+    if project:
+        project_path = manager.projects_root / project
+    else:
+        project_path = manager.get_current_project()
+        if not project_path:
+            click.echo("❌ Error: No IDSE project found", err=True)
+            sys.exit(1)
+
+    project_name = project_path.name
+    session_id = session_id or SessionGraph(project_path).get_current_session()
+
+    if stage not in DesignStoreFilesystem.STAGE_PATHS:
+        click.echo(f"❌ Error: Unknown stage '{stage}'", err=True)
+        sys.exit(1)
+
+    if file_path:
+        content = file_path.read_text()
+    else:
+        content = click.get_text_stream("stdin").read()
+        if not content:
+            click.echo("❌ Error: No content provided on stdin.", err=True)
+            sys.exit(1)
+
+    store = config.get_design_store(manager.idse_root)
+    store.save_artifact(project_name, session_id, stage, content)
+    click.echo(f"✅ Wrote {stage} for {project_name}/{session_id}")
 
 
 @main.group()
@@ -1116,13 +1216,16 @@ def create_session(ctx, session_name: str, project: str):
     state_tracker = StageStateModel(project_path, session_id=session_id)
     state_tracker.init_state(project, session_id, is_blueprint=False)
 
-    config = ArtifactConfig(ctx.obj.get("config_path") if ctx.obj else None)
+    config = ArtifactConfig(
+        ctx.obj.get("config_path") if ctx.obj else None,
+        backend_override=ctx.obj.get("backend_override") if ctx.obj else None,
+    )
     if config.get_backend() == "sqlite":
         from .artifact_database import ArtifactDatabase
         from .design_store import DesignStoreFilesystem
         from .file_view_generator import FileViewGenerator
 
-        db = ArtifactDatabase(idse_root=manager.idse_root)
+        db = ArtifactDatabase(idse_root=manager.idse_root, allow_create=False)
         db.ensure_project(project, stack="python")
         db.ensure_session(
             project,
@@ -1132,6 +1235,7 @@ def create_session(ctx, session_name: str, project: str):
             description=metadata.description,
             is_blueprint=metadata.is_blueprint,
             parent_session=metadata.parent_session,
+            owner=metadata.owner,
             status=metadata.status,
         )
         db.save_session_extras(
@@ -1150,7 +1254,11 @@ def create_session(ctx, session_name: str, project: str):
                 db.save_artifact(project, session_id, stage, path.read_text())
 
         db.save_session_state(project, session_id, state_tracker.get_status(project))
-        FileViewGenerator(idse_root=manager.idse_root).generate_session(project, session_id)
+        db.set_current_session(project, session_id)
+        generator = FileViewGenerator(idse_root=manager.idse_root, allow_create=True)
+        generator.generate_session(project, session_id)
+        generator.generate_session_state(project, session_id)
+        generator.generate_blueprint_meta(project)
 
     from .session_graph import SessionGraph
 
@@ -1159,21 +1267,24 @@ def create_session(ctx, session_name: str, project: str):
     click.echo(f"✅ Feature session created: {session_id}")
     click.echo(f"📁 Location: {session_path}")
     click.echo(f"📝 CURRENT_SESSION updated to: {session_id}")
-    try:
-        from .session_graph import SessionGraph
+    if config.get_backend() != "sqlite":
+        try:
+            from .session_graph import SessionGraph
 
-        SessionGraph(project_path).rebuild_blueprint_meta(project_path)
-        click.echo("📘 Blueprint meta.md refreshed.")
-    except Exception as meta_err:
-        click.echo(f"⚠️  Warning: Failed to refresh blueprint meta: {meta_err}", err=True)
+            SessionGraph(project_path).rebuild_blueprint_meta(project_path)
+            click.echo("📘 Blueprint meta.md refreshed.")
+        except Exception as meta_err:
+            click.echo(f"⚠️  Warning: Failed to refresh blueprint meta: {meta_err}", err=True)
 
 
 @session.command("switch")
 @click.argument("session_id")
 @click.option("--project", help="Project name (uses current if not specified)")
-def switch_session(session_id: str, project: str):
+@click.pass_context
+def switch_session(ctx, session_id: str, project: str):
     """Switch the active session pointer (CURRENT_SESSION)."""
     from .project_workspace import ProjectWorkspace
+    from .artifact_config import ArtifactConfig
 
     manager = ProjectWorkspace()
 
@@ -1194,16 +1305,26 @@ def switch_session(session_id: str, project: str):
         sys.exit(1)
 
     from .session_graph import SessionGraph
-    
+
+    config = ArtifactConfig(
+        backend_override=ctx.obj.get("backend_override") if ctx.obj else None
+    )
+    if config.get_backend() == "sqlite":
+        from .file_view_generator import FileViewGenerator
+
+        generator = FileViewGenerator(idse_root=manager.idse_root, allow_create=False)
+        generator.generate_blueprint_meta(project)
+
     SessionGraph(project_path).set_current_session(session_id)
     click.echo(f"📝 CURRENT_SESSION updated to: {session_id}")
-    try:
-        from .session_graph import SessionGraph
+    if config.get_backend() != "sqlite":
+        try:
+            from .session_graph import SessionGraph
 
-        SessionGraph(project_path).rebuild_blueprint_meta(project_path)
-        click.echo("📘 Blueprint meta.md refreshed.")
-    except Exception as meta_err:
-        click.echo(f"⚠️  Warning: Failed to refresh blueprint meta: {meta_err}", err=True)
+            SessionGraph(project_path).rebuild_blueprint_meta(project_path)
+            click.echo("📘 Blueprint meta.md refreshed.")
+        except Exception as meta_err:
+            click.echo(f"⚠️  Warning: Failed to refresh blueprint meta: {meta_err}", err=True)
 
 
 @main.command()
@@ -1604,7 +1725,10 @@ def status(ctx, project: Optional[str]):
     from .artifact_config import ArtifactConfig
 
     try:
-        config = ArtifactConfig(ctx.obj.get("config_path") if ctx.obj else None)
+        config = ArtifactConfig(
+            ctx.obj.get("config_path") if ctx.obj else None,
+            backend_override=ctx.obj.get("backend_override") if ctx.obj else None,
+        )
         backend = config.get_backend()
         store = None
         if backend == "sqlite":

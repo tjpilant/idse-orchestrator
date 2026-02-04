@@ -16,6 +16,27 @@ class SessionGraph:
         self.project_path = project_path
 
     def get_current_session(self) -> str:
+        try:
+            from .artifact_config import ArtifactConfig
+            from .artifact_database import ArtifactDatabase
+
+            config = ArtifactConfig()
+            if config.get_backend() == "sqlite":
+                idse_root = self.project_path.parent.parent
+                db = ArtifactDatabase(idse_root=idse_root, allow_create=False)
+                current = db.get_current_session(self.project_path.name)
+                if current:
+                    current_session_file = self.project_path / "CURRENT_SESSION"
+                    current_session_file.write_text(current)
+                    return current
+                raise FileNotFoundError(
+                    "Database missing current session. Run 'idse init' or 'idse migrate'."
+                )
+        except FileNotFoundError:
+            raise
+        except Exception:
+            pass
+
         current_session_file = self.project_path / "CURRENT_SESSION"
         if not current_session_file.exists():
             raise FileNotFoundError(f"No CURRENT_SESSION file in {self.project_path}")
@@ -27,20 +48,27 @@ class SessionGraph:
         try:
             from .artifact_config import ArtifactConfig
             from .design_store_sqlite import DesignStoreSQLite
+            from .artifact_database import ArtifactDatabase
             from .stage_state_model import StageStateModel
 
             config = ArtifactConfig()
             if config.get_backend() != "sqlite":
                 return
             idse_root = self.project_path.parent.parent
+            db = ArtifactDatabase(idse_root=idse_root, allow_create=False)
+            db.set_current_session(self.project_path.name, session_id)
             tracker = StageStateModel(
                 project_path=self.project_path,
-                store=DesignStoreSQLite(idse_root=idse_root),
+                store=DesignStoreSQLite(idse_root=idse_root, allow_create=False),
                 project_name=self.project_path.name,
                 session_id=session_id,
             )
             try:
                 tracker.refresh_state_file()
+                from .file_view_generator import FileViewGenerator
+
+                generator = FileViewGenerator(idse_root=idse_root, allow_create=False)
+                generator.generate_agent_registry(self.project_path.name)
             except FileNotFoundError:
                 tracker.init_state(
                     self.project_path.name,
@@ -51,6 +79,17 @@ class SessionGraph:
             return
 
     def create_blueprint_meta(self, project_path: Path, project_name: str) -> None:
+        try:
+            from .artifact_config import ArtifactConfig
+            from .file_view_generator import FileViewGenerator
+
+            config = ArtifactConfig()
+            if config.get_backend() == "sqlite":
+                FileViewGenerator(idse_root=project_path.parent.parent, allow_create=False).generate_blueprint_meta(project_name)
+                return
+        except Exception:
+            pass
+
         blueprint_path = project_path / "sessions" / "__blueprint__"
         meta_file = blueprint_path / "metadata" / "meta.md"
 
@@ -186,6 +225,17 @@ Feedback from Feature Sessions flows upward to inform Blueprint updates.
         return session_path
 
     def update_blueprint_meta(self, project_path: Path, new_session_path: Path) -> None:
+        try:
+            from .artifact_config import ArtifactConfig
+            from .file_view_generator import FileViewGenerator
+
+            config = ArtifactConfig()
+            if config.get_backend() == "sqlite":
+                FileViewGenerator(idse_root=project_path.parent.parent, allow_create=False).generate_blueprint_meta(project_path.name)
+                return
+        except Exception:
+            pass
+
         from .session_metadata import SessionMetadata
 
         blueprint_meta = project_path / "sessions" / "__blueprint__" / "metadata" / "meta.md"
@@ -217,6 +267,17 @@ Feedback from Feature Sessions flows upward to inform Blueprint updates.
         blueprint_meta.write_text(updated)
 
     def rebuild_blueprint_meta(self, project_path: Path) -> None:
+        try:
+            from .artifact_config import ArtifactConfig
+            from .file_view_generator import FileViewGenerator
+
+            config = ArtifactConfig()
+            if config.get_backend() == "sqlite":
+                FileViewGenerator(idse_root=project_path.parent.parent, allow_create=False).generate_blueprint_meta(project_path.name)
+                return
+        except Exception:
+            pass
+
         from .session_metadata import SessionMetadata
 
         blueprint_path = project_path / "sessions" / "__blueprint__"

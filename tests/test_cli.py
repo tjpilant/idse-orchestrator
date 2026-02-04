@@ -74,3 +74,35 @@ def test_cli_query_sessions(tmp_path):
         assert result.exit_code == 0
         assert "__blueprint__" in result.output
         assert "session-1" in result.output
+
+
+def test_cli_artifact_write_sqlite(tmp_path):
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        idse_root = Path(".") / ".idse"
+        project = "demo"
+        (idse_root / "projects" / project / "sessions" / "__blueprint__").mkdir(parents=True, exist_ok=True)
+        (idse_root / "projects" / project / "CURRENT_SESSION").write_text("__blueprint__")
+
+        from idse_orchestrator.artifact_database import ArtifactDatabase
+
+        db = ArtifactDatabase(idse_root=idse_root)
+        db.set_current_session(project, "__blueprint__")
+
+        config_path = Path(".") / ".idseconfig.json"
+        config_path.write_text(
+            '{"artifact_backend": "sqlite", "sqlite": {"db_path": ".idse/idse.db"}}'
+        )
+
+        result = runner.invoke(
+            main,
+            ["--backend", "sqlite", "artifact", "write", "--project", project, "--stage", "feedback"],
+            input="hello feedback",
+        )
+        assert result.exit_code == 0
+
+        record = db.load_artifact(project, "__blueprint__", "feedback")
+        assert record.content == "hello feedback"
+
+        view_path = idse_root / "projects" / project / "sessions" / "__blueprint__" / "feedback" / "feedback.md"
+        assert view_path.exists()

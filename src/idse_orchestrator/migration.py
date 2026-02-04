@@ -42,6 +42,8 @@ class FileToDatabaseMigrator:
 
         self._migrate_project_state(project_path)
         self._migrate_agent_registry(project_path)
+        self._migrate_current_session(project_path)
+        self._generate_blueprint_meta(project_name)
         return summary
 
     def _resolve_project_path(self, project_name: Optional[str]) -> Path:
@@ -79,6 +81,7 @@ class FileToDatabaseMigrator:
             description=metadata.get("description"),
             is_blueprint=metadata.get("is_blueprint"),
             parent_session=metadata.get("parent_session"),
+            owner=metadata.get("owner") or "system",
             status=metadata.get("status"),
         )
         if metadata.get("collaborators") or metadata.get("tags"):
@@ -124,6 +127,7 @@ class FileToDatabaseMigrator:
             "description": None,
             "is_blueprint": session_path.name == "__blueprint__",
             "parent_session": None if session_path.name == "__blueprint__" else "__blueprint__",
+            "owner": "system",
             "status": "draft",
             "collaborators": [],
             "tags": [],
@@ -154,3 +158,20 @@ class FileToDatabaseMigrator:
             return
         project_name = project_path.name
         self.db.save_agent_registry(project_name, registry)
+
+    def _migrate_current_session(self, project_path: Path) -> None:
+        current_file = project_path / "CURRENT_SESSION"
+        project_name = project_path.name
+        if current_file.exists():
+            current = current_file.read_text().strip()
+            if current:
+                self.db.set_current_session(project_name, current)
+
+    def _generate_blueprint_meta(self, project_name: str) -> None:
+        try:
+            from .file_view_generator import FileViewGenerator
+
+            generator = FileViewGenerator(idse_root=self.idse_root, allow_create=True)
+            generator.generate_blueprint_meta(project_name)
+        except Exception:
+            return

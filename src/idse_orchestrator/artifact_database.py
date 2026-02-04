@@ -26,7 +26,12 @@ class ArtifactRecord:
 class ArtifactDatabase:
     """SQLite-backed source of truth for IDSE artifacts and metadata."""
 
-    def __init__(self, db_path: Optional[Path] = None, idse_root: Optional[Path] = None):
+    def __init__(
+        self,
+        db_path: Optional[Path] = None,
+        idse_root: Optional[Path] = None,
+        allow_create: bool = True,
+    ):
         if db_path is None:
             if idse_root is None:
                 from .project_workspace import ProjectWorkspace
@@ -36,6 +41,10 @@ class ArtifactDatabase:
             db_path = idse_root / DEFAULT_DB_NAME
 
         self.db_path = Path(db_path)
+        if not self.db_path.exists() and not allow_create:
+            raise FileNotFoundError(
+                f"Database not found at {self.db_path}. Run 'idse init' or 'idse migrate'."
+            )
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_schema()
 
@@ -49,12 +58,13 @@ class ArtifactDatabase:
         with self._connect() as conn:
             for statement in _schema_statements():
                 conn.execute(statement)
+            _ensure_columns(conn)
 
     def ensure_project(self, project: str, stack: Optional[str] = None, owner: Optional[str] = None) -> int:
         now = _now()
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT id, stack, owner FROM projects WHERE name = ?;",
+                "SELECT id, stack, owner, current_session_id FROM projects WHERE name = ?;",
                 (project,),
             ).fetchone()
             if row:
@@ -78,8 +88,8 @@ class ArtifactDatabase:
 
             conn.execute(
                 """
-                INSERT INTO projects (name, stack, owner, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?);
+                INSERT INTO projects (name, stack, owner, created_at, updated_at, current_session_id)
+                VALUES (?, ?, ?, ?, ?, NULL);
                 """,
                 (project, stack, owner or "system", now, now),
             )
@@ -95,6 +105,7 @@ class ArtifactDatabase:
         description: Optional[str] = None,
         is_blueprint: Optional[bool] = None,
         parent_session: Optional[str] = None,
+        owner: Optional[str] = None,
         status: Optional[str] = None,
     ) -> int:
         project_id = self.ensure_project(project)
@@ -108,6 +119,8 @@ class ArtifactDatabase:
             status = "draft"
         if name is None:
             name = session_id
+        if owner is None:
+            owner = "system"
 
         with self._connect() as conn:
             row = conn.execute(
@@ -124,6 +137,7 @@ class ArtifactDatabase:
                     ("is_blueprint", 1 if is_blueprint else 0),
                     ("parent_session", parent_session),
                     ("status", status),
+                    ("owner", owner),
                 ]:
                     if value is not None:
                         updates.append(f"{column} = ?")
@@ -148,11 +162,12 @@ class ArtifactDatabase:
                     description,
                     is_blueprint,
                     parent_session,
+                    owner,
                     status,
                     created_at,
                     updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
                 """,
                 (
                     project_id,
@@ -162,6 +177,7 @@ class ArtifactDatabase:
                     description,
                     1 if is_blueprint else 0,
                     parent_session,
+                    owner,
                     status,
                     now,
                     now,
@@ -182,6 +198,21 @@ class ArtifactDatabase:
                 (project_id,),
             ).fetchall()
         return [row["session_id"] for row in rows]
+
+    def list_session_metadata(self, project: str) -> list[Dict[str, Any]]:
+        project_id = self.ensure_project(project)
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT session_id, name, session_type, description, is_blueprint, parent_session,
+                       owner, status, created_at, updated_at
+                FROM sessions
+                WHERE project_id = ?
+                ORDER BY created_at;
+                """,
+                (project_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def save_artifact(self, project: str, session_id: str, stage: str, content: str) -> ArtifactRecord:
         project_id = self.ensure_project(project)
@@ -288,6 +319,41 @@ class ArtifactDatabase:
             raise FileNotFoundError(f"State not found for project: {project}")
 
         return json.loads(row["state_json"])
+
+    def set_current_session(self, project: str, session_id: str) -> None:
+        project_id = self.ensure_project(project)
+        now = _now()
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE projects SET current_session_id = ?, updated_at = ? WHERE id = ?;",
+                (session_id, now, project_id),
+            )
+            conn.execute(
+                """
+                INSERT INTO project_state (project_id, state_json, updated_at, current_session_id)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(project_id)
+                DO UPDATE SET current_session_id = excluded.current_session_id, updated_at = excluded.updated_at;
+                """,
+                (project_id, json.dumps({}), now, session_id),
+            )
+
+    def get_current_session(self, project: str) -> Optional[str]:
+        project_id = self.ensure_project(project)
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT current_session_id FROM project_state WHERE project_id = ?;",
+                (project_id,),
+            ).fetchone()
+            if row and row["current_session_id"]:
+                return row["current_session_id"]
+            row = conn.execute(
+                "SELECT current_session_id FROM projects WHERE id = ?;",
+                (project_id,),
+            ).fetchone()
+        if not row:
+            return None
+        return row["current_session_id"]
 
     def save_session_state(self, project: str, session_id: str, state: Dict[str, Any]) -> None:
         session_row_id = self.ensure_session(project, session_id)
@@ -437,6 +503,29 @@ class ArtifactDatabase:
                         (agent_row_id, stage),
                     )
 
+    def load_agent_registry(self, project: str) -> Dict[str, Any]:
+        project_id = self.ensure_project(project)
+        registry = {"agents": []}
+        with self._connect() as conn:
+            agents = conn.execute(
+                "SELECT id, agent_id, role, mode FROM agents WHERE project_id = ?;",
+                (project_id,),
+            ).fetchall()
+            for agent in agents:
+                stages = conn.execute(
+                    "SELECT stage FROM agent_stages WHERE agent_id = ?;",
+                    (agent["id"],),
+                ).fetchall()
+                registry["agents"].append(
+                    {
+                        "id": agent["agent_id"],
+                        "role": agent["role"],
+                        "mode": agent["mode"],
+                        "stages": [s["stage"] for s in stages],
+                    }
+                )
+        return registry
+
     def save_session_extras(
         self,
         project: str,
@@ -497,6 +586,21 @@ def _hash_content(content: str) -> str:
     return hash_content(content)
 
 
+def _ensure_columns(conn: sqlite3.Connection) -> None:
+    cursor = conn.execute("PRAGMA table_info(projects);")
+    columns = {row[1] for row in cursor.fetchall()}
+    if "current_session_id" not in columns:
+        conn.execute("ALTER TABLE projects ADD COLUMN current_session_id TEXT;")
+    cursor = conn.execute("PRAGMA table_info(project_state);")
+    state_columns = {row[1] for row in cursor.fetchall()}
+    if "current_session_id" not in state_columns:
+        conn.execute("ALTER TABLE project_state ADD COLUMN current_session_id TEXT;")
+    cursor = conn.execute("PRAGMA table_info(sessions);")
+    session_columns = {row[1] for row in cursor.fetchall()}
+    if "owner" not in session_columns:
+        conn.execute("ALTER TABLE sessions ADD COLUMN owner TEXT;")
+
+
 def _schema_statements() -> Iterable[str]:
     return [
         """
@@ -506,7 +610,8 @@ def _schema_statements() -> Iterable[str]:
             stack TEXT,
             owner TEXT,
             created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
+            updated_at TEXT NOT NULL,
+            current_session_id TEXT
         );
         """,
         """
@@ -519,6 +624,7 @@ def _schema_statements() -> Iterable[str]:
             description TEXT,
             is_blueprint INTEGER NOT NULL DEFAULT 0,
             parent_session TEXT,
+            owner TEXT,
             status TEXT NOT NULL,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
@@ -545,6 +651,7 @@ def _schema_statements() -> Iterable[str]:
         CREATE TABLE IF NOT EXISTS project_state (
             project_id INTEGER PRIMARY KEY,
             state_json TEXT NOT NULL,
+            current_session_id TEXT,
             updated_at TEXT NOT NULL,
             FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
         );

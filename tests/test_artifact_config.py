@@ -26,6 +26,9 @@ def test_artifact_config_sqlite_backend(tmp_path: Path):
         json.dumps({"artifact_backend": "sqlite", "sqlite": {"db_path": str(db_path)}})
     )
 
+    from idse_orchestrator.artifact_database import ArtifactDatabase
+
+    ArtifactDatabase(db_path=db_path, allow_create=True)
     config = ArtifactConfig(config_path)
     store = config.get_design_store()
 

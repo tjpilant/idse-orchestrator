@@ -34,6 +34,7 @@ class ProjectWorkspace:
         owner: Optional[str] = None,
         create_agent_files: bool = True,
         is_blueprint: bool = True,
+        backend: Optional[str] = None,
     ) -> Path:
         """
         Initialize a new IDSE project with full directory structure.
@@ -44,6 +45,7 @@ class ProjectWorkspace:
             owner: Optional owner identifier
             create_agent_files: If True, creates CLAUDE.md, AGENTS.md, .cursorrules in repo root
             is_blueprint: If True, creates a blueprint session; otherwise creates a feature session
+            backend: Optional backend override ("sqlite" or "filesystem")
 
         Returns:
             Path to created project directory
@@ -147,51 +149,57 @@ class ProjectWorkspace:
         if create_agent_files:
             self._create_agent_instructions(project_name, stack)
 
-        # If sqlite backend configured, seed database and regenerate views
-        try:
-            from .artifact_config import ArtifactConfig
+        if backend is None or backend == "sqlite":
+            from .artifact_database import ArtifactDatabase
+            from .design_store import DesignStoreFilesystem
+            from .file_view_generator import FileViewGenerator
 
-            config = ArtifactConfig()
-            if config.get_backend() == "sqlite":
-                from .artifact_database import ArtifactDatabase
-                from .design_store import DesignStoreFilesystem
-                from .file_view_generator import FileViewGenerator
+            db = ArtifactDatabase(idse_root=self.idse_root)
+            db.ensure_project(project_name, stack=stack, owner=owner)
+            db.ensure_session(
+                project_name,
+                session_id,
+                name=metadata.name,
+                session_type=metadata.session_type,
+                description=metadata.description,
+                is_blueprint=metadata.is_blueprint,
+                parent_session=metadata.parent_session,
+                owner=metadata.owner,
+                status=metadata.status,
+            )
+            db.save_session_extras(
+                project_name,
+                session_id,
+                collaborators=[c.to_dict() for c in metadata.collaborators],
+                tags=metadata.tags,
+            )
 
-                db = ArtifactDatabase(idse_root=self.idse_root)
-                db.ensure_project(project_name, stack=stack, owner=owner)
-                db.ensure_session(
-                    project_name,
-                    session_id,
-                    name=metadata.name,
-                    session_type=metadata.session_type,
-                    description=metadata.description,
-                    is_blueprint=metadata.is_blueprint,
-                    parent_session=metadata.parent_session,
-                    status=metadata.status,
-                )
-                db.save_session_extras(
-                    project_name,
-                    session_id,
-                    collaborators=[c.to_dict() for c in metadata.collaborators],
-                    tags=metadata.tags,
-                )
+            stage_paths = {
+                stage: session_path / folder / filename
+                for stage, (folder, filename) in DesignStoreFilesystem.STAGE_PATHS.items()
+            }
+            for stage, path in stage_paths.items():
+                if path.exists():
+                    db.save_artifact(project_name, session_id, stage, path.read_text())
 
-                stage_paths = {
-                    stage: session_path / folder / filename
-                    for stage, (folder, filename) in DesignStoreFilesystem.STAGE_PATHS.items()
-                }
-                for stage, path in stage_paths.items():
-                    if path.exists():
-                        db.save_artifact(project_name, session_id, stage, path.read_text())
+            tracker = StageStateModel(project_path, session_id=session_id)
+            db.save_session_state(project_name, session_id, tracker.get_status(project_name))
+            db.set_current_session(project_name, session_id)
 
-                tracker = StageStateModel(project_path)
-                db.save_session_state(project_name, session_id, tracker.get_status(project_name))
+            generator = FileViewGenerator(idse_root=self.idse_root, allow_create=True)
+            generator.generate_session(project_name, session_id)
+            generator.generate_session_state(project_name, session_id)
+            generator.generate_blueprint_meta(project_name)
+            try:
+                registry_path = self._project_path(project_name) / "agent_registry.json"
+                if registry_path.exists():
+                    import json
 
-                generator = FileViewGenerator(idse_root=self.idse_root)
-                generator.generate_session(project_name, session_id)
-        except Exception:
-            # SQLite seeding is best-effort; filesystem remains authoritative unless configured.
-            pass
+                    registry = json.loads(registry_path.read_text())
+                    db.save_agent_registry(project_name, registry)
+                    generator.generate_agent_registry(project_name)
+            except Exception:
+                pass
 
         return project_path
 

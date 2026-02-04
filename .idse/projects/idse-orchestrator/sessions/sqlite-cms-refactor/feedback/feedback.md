@@ -11,6 +11,8 @@
 - 2026-02-04: Implemented default sqlite backend and explicit `--backend filesystem` opt-in.
 - 2026-02-04: Session state naming/behavior mismatch reported — `session_state.json` should reflect CURRENT_SESSION and be a generated view from SQLite session state.
 - 2026-02-04: Implemented per-session state storage and session_state.json regeneration on session switch.
+- 2026-02-04: Refactor plan for SQLite-default alignment logged and implemented (strict precedence, no implicit fallback).
+- 2026-02-04: Blueprint meta moved to DB-backed view generation.
 
 ## Impacted Artifacts
 - Intent: No changes
@@ -28,6 +30,7 @@
 - Phase 5 completed. Owner: implementer. Status: done.
 - Update implementation to make SQLite default backend and adjust init/validate/config precedence. Owner: implementer. Status: done.
 - Implement session_state view regeneration from SQLite when CURRENT_SESSION changes; ensure `session_state.json` matches CURRENT_SESSION. Owner: implementer. Status: done.
+- Enforce SQLite default behavior with explicit overrides only. Owner: implementer. Status: done.
 
 ## Decision Log
 - Stored project state as JSON in SQLite for parity with legacy `session_state.json`.

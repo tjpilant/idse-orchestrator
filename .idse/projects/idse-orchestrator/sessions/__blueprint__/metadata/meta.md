@@ -6,20 +6,21 @@ This document tracks all sessions spawned from this Blueprint.
 
 ### Active Sessions
 - `__blueprint__` (THIS SESSION) - Project governance and roadmap
-- `sqlite-cms-refactor` - Refactor IDSE from file-based to SQLite-based architecture
+- `designstore-file-artifacts` - Feature session
+- `sqlite-cms-refactor` - Feature session
 
 ## Session Status Matrix
 
 | Session ID | Type | Status | Owner | Created | Progress |
 |------------|------|--------|-------|---------|----------|
-| __blueprint__ | blueprint | active | system | 2026-02-02 | 90% |
-| sqlite-cms-refactor | feature | pending_implementation | system | 2026-02-04 | 0% |
+| __blueprint__ | blueprint | draft | system | 2026-02-04 | 0% |
+| designstore-file-artifacts | feature | draft | system | 2026-02-04 | 0% |
+| sqlite-cms-refactor | feature | draft | system | 2026-02-04 | 0% |
 
 ## Lineage Graph
 
 ```
 __blueprint__ (root)
-└── sqlite-cms-refactor
 ```
 
 ## Governance
@@ -37,4 +38,4 @@ All Feature Sessions inherit from this Blueprint's context and specs.
 Feedback from Feature Sessions flows upward to inform Blueprint updates.
 
 ---
-*Last updated: 2026-02-04T18:32:57.694977*
+*Last updated: 2026-02-04T21:33:46.847584*

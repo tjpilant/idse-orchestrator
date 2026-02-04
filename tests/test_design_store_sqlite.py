@@ -5,7 +5,7 @@ from idse_orchestrator.design_store_sqlite import DesignStoreSQLite
 
 def test_design_store_sqlite_crud(tmp_path: Path) -> None:
     idse_root = tmp_path / ".idse"
-    store = DesignStoreSQLite(idse_root=idse_root)
+    store = DesignStoreSQLite(idse_root=idse_root, allow_create=True)
 
     project = "demo"
     session = "s1"
