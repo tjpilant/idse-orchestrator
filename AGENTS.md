@@ -4,6 +4,12 @@
 
 This project uses **IDSE (Intent-Driven Systems Engineering)**.
 
+## Planning Mode Override
+
+If you are running in **planning mode**, ignore implementation-only directives below.
+In planning mode, you should only update Intent/Context/Spec/Plan/Tasks and request
+a handoff for implementation.
+
 ### Quick Start
 
 1. **Find the current session**:
