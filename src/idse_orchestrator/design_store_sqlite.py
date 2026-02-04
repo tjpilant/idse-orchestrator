@@ -28,3 +28,9 @@ class DesignStoreSQLite(DesignStore):
 
     def save_state(self, project: str, state: Dict) -> None:
         self.db.save_state(project, state)
+
+    def load_session_state(self, project: str, session_id: str) -> Dict:
+        return self.db.load_session_state(project, session_id)
+
+    def save_session_state(self, project: str, session_id: str, state: Dict) -> None:
+        self.db.save_session_state(project, session_id, state)

@@ -289,6 +289,41 @@ class ArtifactDatabase:
 
         return json.loads(row["state_json"])
 
+    def save_session_state(self, project: str, session_id: str, state: Dict[str, Any]) -> None:
+        session_row_id = self.ensure_session(project, session_id)
+        now = _now()
+        payload = json.dumps(state)
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO session_state (session_id, state_json, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(session_id)
+                DO UPDATE SET state_json = excluded.state_json, updated_at = excluded.updated_at;
+                """,
+                (session_row_id, payload, now),
+            )
+
+    def load_session_state(self, project: str, session_id: str) -> Dict[str, Any]:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT ss.state_json
+                FROM session_state ss
+                JOIN sessions s ON ss.session_id = s.id
+                JOIN projects p ON s.project_id = p.id
+                WHERE p.name = ? AND s.session_id = ?;
+                """,
+                (project, session_id),
+            ).fetchone()
+
+        if not row:
+            raise FileNotFoundError(
+                f"State not found for project={project} session={session_id}"
+            )
+
+        return json.loads(row["state_json"])
+
     def list_artifacts(
         self,
         project: str,
@@ -512,6 +547,14 @@ def _schema_statements() -> Iterable[str]:
             state_json TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS session_state (
+            session_id INTEGER PRIMARY KEY,
+            state_json TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
         );
         """,
         """

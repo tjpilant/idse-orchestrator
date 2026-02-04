@@ -35,6 +35,9 @@ class ValidationEngine:
         from .project_workspace import ProjectWorkspace
         from .session_graph import SessionGraph
         from .stage_state_model import StageStateModel
+        from .artifact_config import ArtifactConfig
+        from .artifact_database import ArtifactDatabase
+        from .design_store_sqlite import DesignStoreSQLite
 
         manager = ProjectWorkspace()
         if project_name:
@@ -58,24 +61,56 @@ class ValidationEngine:
 
         session_id = SessionGraph(project_path).get_current_session()
         session_path = project_path / "sessions" / session_id
+        project_name = project_path.name
+
+        config = ArtifactConfig()
+        backend = config.get_backend()
+        use_db = backend == "sqlite"
+        db = ArtifactDatabase(idse_root=manager.idse_root) if use_db else None
 
         checks: List[str] = []
         errors: List[str] = []
         warnings: List[str] = []
 
         artifacts = ["intent.md", "context.md", "spec.md", "plan.md", "tasks.md", "feedback.md"]
+        artifact_stage_map = {
+            "intent.md": "intent",
+            "context.md": "context",
+            "spec.md": "spec",
+            "plan.md": "plan",
+            "tasks.md": "tasks",
+            "feedback.md": "feedback",
+        }
 
         for artifact in artifacts:
-            artifact_path = self._get_artifact_path(session_path, artifact)
-            if artifact_path.exists():
-                checks.append(f"{artifact} exists")
+            if use_db and db:
+                stage = artifact_stage_map[artifact]
+                try:
+                    db.load_artifact(project_name, session_id, stage)
+                    checks.append(f"{artifact} exists")
+                except FileNotFoundError:
+                    errors.append(f"{artifact} is missing")
             else:
-                errors.append(f"{artifact} is missing")
+                artifact_path = self._get_artifact_path(session_path, artifact)
+                if artifact_path.exists():
+                    checks.append(f"{artifact} exists")
+                else:
+                    errors.append(f"{artifact} is missing")
 
         for artifact in artifacts:
-            artifact_path = self._get_artifact_path(session_path, artifact)
-            if artifact_path.exists():
-                content = artifact_path.read_text()
+            content = None
+            if use_db and db:
+                stage = artifact_stage_map[artifact]
+                try:
+                    content = db.load_artifact(project_name, session_id, stage).content
+                except FileNotFoundError:
+                    content = None
+            else:
+                artifact_path = self._get_artifact_path(session_path, artifact)
+                if artifact_path.exists():
+                    content = artifact_path.read_text()
+
+            if content is not None:
                 scan_text = self._strip_code(content)
                 if "[REQUIRES INPUT]" in scan_text:
                     errors.append(f"{artifact} contains [REQUIRES INPUT] markers")
@@ -83,9 +118,20 @@ class ValidationEngine:
                     checks.append(f"{artifact} has no [REQUIRES INPUT] markers")
 
         for artifact, required_sections in REQUIRED_SECTIONS.items():
-            artifact_path = self._get_artifact_path(session_path, artifact)
-            if artifact_path.exists():
-                content = artifact_path.read_text()
+            content = None
+            if use_db and db:
+                stage = artifact_stage_map.get(artifact)
+                if stage:
+                    try:
+                        content = db.load_artifact(project_name, session_id, stage).content
+                    except FileNotFoundError:
+                        content = None
+            else:
+                artifact_path = self._get_artifact_path(session_path, artifact)
+                if artifact_path.exists():
+                    content = artifact_path.read_text()
+
+            if content is not None:
                 for section in required_sections:
                     pattern = rf"##?\s+.*{re.escape(section)}"
                     if re.search(pattern, content, re.IGNORECASE):
@@ -100,8 +146,17 @@ class ValidationEngine:
             "warnings": warnings,
         }
 
-        tracker = StageStateModel(project_path)
-        tracker.set_validation_status("passing" if results["valid"] else "failing")
+        try:
+            if use_db:
+                tracker = StageStateModel(
+                    store=DesignStoreSQLite(idse_root=manager.idse_root),
+                    project_name=project_name,
+                )
+            else:
+                tracker = StageStateModel(project_path)
+            tracker.set_validation_status("passing" if results["valid"] else "failing")
+        except Exception as exc:
+            warnings.append(f"Failed to persist validation status: {exc}")
 
         return results
 

@@ -31,3 +31,9 @@ def test_artifact_config_sqlite_backend(tmp_path: Path):
 
     assert isinstance(store, DesignStoreSQLite)
     assert store.db.db_path == db_path
+
+
+def test_artifact_config_default_backend_sqlite(tmp_path: Path):
+    config_path = tmp_path / "idseconfig.json"
+    config = ArtifactConfig(config_path)
+    assert config.get_backend() == "sqlite"

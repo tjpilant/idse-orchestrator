@@ -41,9 +41,14 @@ def main(ctx):
     type=click.Choice(["agency-swarm", "crew-ai", "autogen"], case_sensitive=False),
     help="Agent framework to integrate (agency-swarm, crew-ai, autogen)",
 )
+@click.option(
+    "--backend",
+    type=click.Choice(["sqlite", "filesystem"], case_sensitive=False),
+    help="Override artifact backend (filesystem is legacy opt-in).",
+)
 @click.option("--create-agent-files/--no-create-agent-files", default=True, help="Create agent instruction files (CLAUDE.md, AGENTS.md, .cursorrules)")
 @click.pass_context
-def init(ctx, project_name: str, stack: str, guided: bool, agentic: Optional[str], create_agent_files: bool):
+def init(ctx, project_name: str, stack: str, guided: bool, agentic: Optional[str], backend: Optional[str], create_agent_files: bool):
     """
     Initialize a new IDSE project with blueprint session.
 
@@ -61,6 +66,13 @@ def init(ctx, project_name: str, stack: str, guided: bool, agentic: Optional[str
     click.echo(f"   Stack: {stack}")
 
     try:
+        if backend:
+            from .artifact_config import ArtifactConfig
+
+            config = ArtifactConfig()
+            config.config["artifact_backend"] = backend.lower()
+            config.save()
+
         manager = ProjectWorkspace()
         project_path = manager.init_project(project_name, stack, create_agent_files=create_agent_files)
 
@@ -327,23 +339,29 @@ def query(ctx, query_name: str, project: Optional[str], session_id: Optional[str
         return
 
     if query_name == "stage-status":
+        from .session_graph import SessionGraph
+
+        current_session = SessionGraph(project_path).get_current_session()
         try:
-            state = db.load_state(project_name)
+            state = db.load_session_state(project_name, current_session)
         except FileNotFoundError:
-            click.echo("No project state recorded.")
+            click.echo("No session state recorded.")
             return
         click.echo(f"Project: {state.get('project_name')}")
-        click.echo(f"Session: {state.get('session_id')}")
+        click.echo(f"Session: {state.get('session_id', current_session)}")
         click.echo("Stages:")
         for stage_name, status in state.get("stages", {}).items():
             click.echo(f" - {stage_name}: {status}")
         return
 
     if query_name == "unsynced":
+        from .session_graph import SessionGraph
+
+        current_session = SessionGraph(project_path).get_current_session()
         try:
-            state = db.load_state(project_name)
+            state = db.load_session_state(project_name, current_session)
         except FileNotFoundError:
-            click.echo("No project state recorded.")
+            click.echo("No session state recorded.")
             return
         last_sync = state.get("last_sync") or "Never"
         click.echo(f"Last Sync: {last_sync}")
@@ -584,7 +602,7 @@ def setup(ctx):
     config = ArtifactConfig(ctx.obj.get("config_path"))
 
     backend = click.prompt(
-        "Artifact backend", type=click.Choice(["filesystem", "sqlite", "notion"]), default="filesystem"
+        "Artifact backend", type=click.Choice(["sqlite", "filesystem", "notion"]), default="sqlite"
     )
     config.config["artifact_backend"] = backend
 
@@ -1093,13 +1111,9 @@ def create_session(ctx, session_name: str, project: str):
     )
     metadata.save(session_path)
 
-    from .session_graph import SessionGraph
-    
-    SessionGraph(project_path).set_current_session(session_id)
-
     from .stage_state_model import StageStateModel
 
-    state_tracker = StageStateModel(project_path)
+    state_tracker = StageStateModel(project_path, session_id=session_id)
     state_tracker.init_state(project, session_id, is_blueprint=False)
 
     config = ArtifactConfig(ctx.obj.get("config_path") if ctx.obj else None)
@@ -1135,8 +1149,12 @@ def create_session(ctx, session_name: str, project: str):
             if path.exists():
                 db.save_artifact(project, session_id, stage, path.read_text())
 
-        db.save_state(project, state_tracker.get_status(project))
+        db.save_session_state(project, session_id, state_tracker.get_status(project))
         FileViewGenerator(idse_root=manager.idse_root).generate_session(project, session_id)
+
+    from .session_graph import SessionGraph
+
+    SessionGraph(project_path).set_current_session(session_id)
 
     click.echo(f"✅ Feature session created: {session_id}")
     click.echo(f"📁 Location: {session_path}")

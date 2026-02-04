@@ -24,6 +24,31 @@ class SessionGraph:
     def set_current_session(self, session_id: str) -> None:
         current_session_file = self.project_path / "CURRENT_SESSION"
         current_session_file.write_text(session_id)
+        try:
+            from .artifact_config import ArtifactConfig
+            from .design_store_sqlite import DesignStoreSQLite
+            from .stage_state_model import StageStateModel
+
+            config = ArtifactConfig()
+            if config.get_backend() != "sqlite":
+                return
+            idse_root = self.project_path.parent.parent
+            tracker = StageStateModel(
+                project_path=self.project_path,
+                store=DesignStoreSQLite(idse_root=idse_root),
+                project_name=self.project_path.name,
+                session_id=session_id,
+            )
+            try:
+                tracker.refresh_state_file()
+            except FileNotFoundError:
+                tracker.init_state(
+                    self.project_path.name,
+                    session_id,
+                    is_blueprint=session_id == "__blueprint__",
+                )
+        except Exception:
+            return
 
     def create_blueprint_meta(self, project_path: Path, project_name: str) -> None:
         blueprint_path = project_path / "sessions" / "__blueprint__"

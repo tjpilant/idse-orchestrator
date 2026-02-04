@@ -138,7 +138,11 @@ class FileToDatabaseMigrator:
         except json.JSONDecodeError:
             return
         project_name = project_path.name
-        self.db.save_state(project_name, state)
+        session_id = state.get("session_id")
+        if session_id:
+            self.db.save_session_state(project_name, session_id, state)
+        else:
+            self.db.save_state(project_name, state)
 
     def _migrate_agent_registry(self, project_path: Path) -> None:
         registry_file = project_path / "agent_registry.json"

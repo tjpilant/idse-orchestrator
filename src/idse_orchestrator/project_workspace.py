@@ -136,7 +136,7 @@ class ProjectWorkspace:
         # Initialize session_state.json
         from .stage_state_model import StageStateModel
 
-        tracker = StageStateModel(project_path)
+        tracker = StageStateModel(project_path, session_id=session_id)
         tracker.init_state(project_name, session_id, is_blueprint=is_blueprint)
 
         # Create blueprint meta.md if this is a blueprint session
@@ -185,7 +185,7 @@ class ProjectWorkspace:
                         db.save_artifact(project_name, session_id, stage, path.read_text())
 
                 tracker = StageStateModel(project_path)
-                db.save_state(project_name, tracker.get_status(project_name))
+                db.save_session_state(project_name, session_id, tracker.get_status(project_name))
 
                 generator = FileViewGenerator(idse_root=self.idse_root)
                 generator.generate_session(project_name, session_id)

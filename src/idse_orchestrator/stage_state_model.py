@@ -17,7 +17,13 @@ class StageStateModel:
 
     STAGE_NAMES = ["intent", "context", "spec", "plan", "tasks", "implementation", "feedback"]
 
-    def __init__(self, project_path: Optional[Path] = None, store=None, project_name: Optional[str] = None):
+    def __init__(
+        self,
+        project_path: Optional[Path] = None,
+        store=None,
+        project_name: Optional[str] = None,
+        session_id: Optional[str] = None,
+    ):
         """
         Initialize StageStateModel.
 
@@ -27,6 +33,7 @@ class StageStateModel:
         self.project_path = project_path
         self.store = store
         self.project_name = project_name
+        self.session_id = session_id
         if project_path:
             self.state_file = project_path / "session_state.json"
         else:
@@ -45,6 +52,7 @@ class StageStateModel:
             Initial state dictionary
         """
         self.project_name = project_name
+        self.session_id = session_id
         if not self.state_file and not self.store:
             raise ValueError("Project path not set")
 
@@ -140,6 +148,9 @@ class StageStateModel:
             self.project_name = project_name
 
         if self.store and self.project_name:
+            self._resolve_session_id()
+            if hasattr(self.store, "load_session_state") and self.session_id:
+                return self.store.load_session_state(self.project_name, self.session_id)
             return self.store.load_state(self.project_name)
 
         if not self.state_file or not self.state_file.exists():
@@ -180,6 +191,9 @@ class StageStateModel:
     def _read_state(self) -> Dict:
         """Read state from JSON file."""
         if self.store and self.project_name:
+            self._resolve_session_id()
+            if hasattr(self.store, "load_session_state") and self.session_id:
+                return self.store.load_session_state(self.project_name, self.session_id)
             return self.store.load_state(self.project_name)
 
         if not self.state_file or not self.state_file.exists():
@@ -191,7 +205,13 @@ class StageStateModel:
     def _write_state(self, state: Dict) -> None:
         """Write state to JSON file."""
         if self.store and self.project_name:
-            self.store.save_state(self.project_name, state)
+            self._resolve_session_id()
+            if hasattr(self.store, "save_session_state") and self.session_id:
+                self.store.save_session_state(self.project_name, self.session_id, state)
+            else:
+                self.store.save_state(self.project_name, state)
+            if self.state_file:
+                self._write_state_file(state)
             return
 
         if not self.state_file:
@@ -201,3 +221,30 @@ class StageStateModel:
 
         with self.state_file.open("w") as f:
             json.dump(state, f, indent=2)
+
+    def _write_state_file(self, state: Dict) -> None:
+        if not self.state_file:
+            return
+        self.state_file.parent.mkdir(parents=True, exist_ok=True)
+        with self.state_file.open("w") as f:
+            json.dump(state, f, indent=2)
+
+    def refresh_state_file(self) -> None:
+        state = self._read_state()
+        if self.session_id:
+            expected_blueprint = self.session_id == "__blueprint__"
+            if state.get("session_id") != self.session_id or state.get("is_blueprint") != expected_blueprint:
+                state["session_id"] = self.session_id
+                state["is_blueprint"] = expected_blueprint
+                self._write_state(state)
+        self._write_state_file(state)
+
+    def _resolve_session_id(self) -> None:
+        if self.session_id or not self.project_path:
+            return
+        try:
+            from .session_graph import SessionGraph
+
+            self.session_id = SessionGraph(self.project_path).get_current_session()
+        except Exception:
+            return

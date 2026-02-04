@@ -40,7 +40,7 @@ class ArtifactConfig:
         return (
             self.config.get("artifact_backend")
             or self.config.get("backend")
-            or "filesystem"
+            or "sqlite"
         )
 
     def get_design_store(self, idse_root: Optional[Path] = None) -> DesignStore:

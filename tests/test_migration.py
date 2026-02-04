@@ -50,7 +50,7 @@ def test_file_to_db_migration(tmp_path: Path) -> None:
     record = db.load_artifact(project, "__blueprint__", "intent")
     assert record.content == "intent content"
 
-    state = db.load_state(project)
+    state = db.load_session_state(project, "__blueprint__")
     assert state["project_name"] == "demo"
 
     conn = sqlite3.connect(db.db_path)
