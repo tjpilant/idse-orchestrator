@@ -63,6 +63,12 @@ class AgentRegistry:
                         "mode": "implementation",
                         "stages": ["implementation"],
                     },
+                    {
+                        "id": "github-copilot",
+                        "role": "implementer",
+                        "mode": "implementation",
+                        "stages": ["implementation", "feedback"],
+                    },
                 ]
             }
             # Persist defaults for project-level registries
