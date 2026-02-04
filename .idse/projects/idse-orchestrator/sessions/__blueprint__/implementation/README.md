@@ -114,3 +114,9 @@ Stage select values must be:
 - `idse sync test` verifies tool access and schema.
 - `idse sync tools --schema` dumps MCP tool schemas.
 - `idse sync push --yes --debug` shows payloads and MCP results.
+
+## Boundary: Pipeline Docs vs File Artifacts
+
+Meta and Implementation files are pipeline artifacts and belong here.  
+Binary or non-markdown uploads (design assets, datasets, compiled outputs) should be handled
+by DesignStore/NotionDesignStore extensions, not by the pipeline docs themselves.
