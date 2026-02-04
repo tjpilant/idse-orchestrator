@@ -122,7 +122,15 @@ class NotionDesignStore(MCPDesignStoreAdapter):
                 }
                 if self.debug:
                     _debug_payload(self.tool_names["update_page"], payload_props)
-                result = self._call_tool(self.tool_names["update_page"], payload_props)
+                try:
+                    result = self._call_tool(self.tool_names["update_page"], payload_props)
+                except RuntimeError as exc:
+                    if "Property \"IDSE_ID\" not found" in str(exc):
+                        flat_props_no_id = _drop_idse_id(flat_properties, self.properties)
+                        payload_props["data"]["properties"] = flat_props_no_id
+                        result = self._call_tool(self.tool_names["update_page"], payload_props)
+                    else:
+                        raise
                 if self.debug:
                     _debug_result(self.tool_names["update_page"], result)
 
@@ -149,7 +157,14 @@ class NotionDesignStore(MCPDesignStoreAdapter):
             }
             if self.debug:
                 _debug_payload(create_tool, payload)
-            new_page = self._call_tool(create_tool, payload)
+            try:
+                new_page = self._call_tool(create_tool, payload)
+            except RuntimeError as exc:
+                if "Property \"IDSE_ID\" not found" in str(exc):
+                    payload["properties"] = _drop_idse_id(properties, self.properties)
+                    new_page = self._call_tool(create_tool, payload)
+                else:
+                    raise
             if self.debug:
                 _debug_result(create_tool, new_page)
             if content_payload is not None and self.tool_names.get("append_children"):
@@ -182,7 +197,16 @@ class NotionDesignStore(MCPDesignStoreAdapter):
 
             if self.debug:
                 _debug_payload(create_tool, payload)
-            result = self._call_tool(create_tool, payload)
+            try:
+                result = self._call_tool(create_tool, payload)
+            except RuntimeError as exc:
+                if "Property \"IDSE_ID\" not found" in str(exc):
+                    payload["pages"][0]["properties"] = _drop_idse_id(
+                        payload["pages"][0]["properties"], self.properties
+                    )
+                    result = self._call_tool(create_tool, payload)
+                else:
+                    raise
             if self.debug:
                 _debug_result(create_tool, result)
             return
@@ -573,6 +597,13 @@ def _format_stage_value(stage: str) -> str:
 
 def _make_idse_id(project: str, session_id: str, stage: str) -> str:
     return f"{project}::{session_id}::{stage}"
+
+
+def _drop_idse_id(properties: Dict[str, Any], prop_map: Dict[str, Dict[str, str]]) -> Dict[str, Any]:
+    name = prop_map.get("idse_id", {}).get("name", "IDSE_ID")
+    if name in properties:
+        return {k: v for k, v in properties.items() if k != name}
+    return properties
 
 
 def _debug_payload(tool_name: str, payload: Dict[str, Any]) -> None:
