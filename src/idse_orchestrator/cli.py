@@ -177,8 +177,9 @@ def sync(ctx, config_path: Optional[Path]):
 @click.option("--session", "session_override", help="Session ID (uses CURRENT_SESSION if not specified)")
 @click.option("--yes", is_flag=True, help="Skip overwrite confirmation")
 @click.option("--debug", is_flag=True, help="Print MCP payloads")
+@click.option("--force-create", is_flag=True, help="Always create new pages (no upsert)")
 @click.pass_context
-def push(ctx, project: Optional[str], session_override: Optional[str], yes: bool, debug: bool):
+def push(ctx, project: Optional[str], session_override: Optional[str], yes: bool, debug: bool, force_create: bool):
     """
     Write pipeline artifacts through the DesignStore.
 
@@ -227,6 +228,8 @@ def push(ctx, project: Optional[str], session_override: Optional[str], yes: bool
         remote_store = config.get_design_store(manager.idse_root)
         if debug and hasattr(remote_store, "set_debug"):
             remote_store.set_debug(True)
+        if force_create and hasattr(remote_store, "set_force_create"):
+            remote_store.set_force_create(True)
         tracker = StageStateModel(project_path)
 
         if not yes and not click.confirm(

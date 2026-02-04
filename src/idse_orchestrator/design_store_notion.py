@@ -53,6 +53,7 @@ class NotionDesignStore(MCPDesignStoreAdapter):
         self.debug = False
         self.use_idse_id = True
         self._idse_schema_checked = False
+        self.force_create = False
         self.tool_names = {**self.DEFAULT_TOOL_NAMES, **(tool_names or {})}
         self.properties = self._normalize_properties(
             {**self.DEFAULT_PROPERTIES, **(properties or {})}
@@ -74,6 +75,9 @@ class NotionDesignStore(MCPDesignStoreAdapter):
 
     def set_debug(self, enabled: bool) -> None:
         self.debug = enabled
+
+    def set_force_create(self, enabled: bool) -> None:
+        self.force_create = enabled
 
     def load_artifact(self, project: str, session_id: str, stage: str) -> str:
         page = self._query_artifact_page(project, session_id, stage)
@@ -332,6 +336,8 @@ class NotionDesignStore(MCPDesignStoreAdapter):
         self, project: str, session_id: str, stage: str
     ) -> Optional[Dict[str, Any]]:
         self._ensure_idse_id_property()
+        if self.force_create:
+            return None
         filters = [
             self._property_filter(
                 "idse_id", _make_idse_id(project, session_id, stage)
