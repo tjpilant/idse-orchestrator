@@ -304,8 +304,21 @@ class NotionDesignStore(MCPDesignStoreAdapter):
                 "idse_id", _make_idse_id(project, session_id, stage)
             )
         ]
-        results = self._query_database(filters)
-        return results[0] if results else None
+        try:
+            results = self._query_database(filters)
+        except RuntimeError as exc:
+            if "IDSE_ID" not in str(exc):
+                raise
+            results = []
+        if results:
+            return results[0]
+        fallback_filters = [
+            self._property_filter("project", project),
+            self._property_filter("session", session_id),
+            self._property_filter("stage", stage),
+        ]
+        fallback_results = self._query_database(fallback_filters)
+        return fallback_results[0] if fallback_results else None
 
     def _query_database(self, filters: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         payload: Dict[str, Any] = {}
