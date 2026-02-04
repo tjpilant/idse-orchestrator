@@ -353,7 +353,18 @@ class NotionDesignStore(MCPDesignStoreAdapter):
             self._property_filter("stage", stage),
         ]
         fallback_results = self._query_database(fallback_filters)
-        return fallback_results[0] if fallback_results else None
+        if fallback_results:
+            return fallback_results[0]
+
+        # Last-resort: search by IDSE_ID or Title across workspace, then filter by parent database.
+        idse_query = _make_idse_id(project, session_id, stage)
+        title_query = f"{_format_stage_value(stage)} – {project} – {session_id}"
+        for query in (idse_query, title_query):
+            results = self._search_pages(query)
+            page = _pick_page_in_database(results, self.database_id)
+            if page:
+                return page
+        return None
 
     def _query_database(self, filters: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         payload: Dict[str, Any] = {}
@@ -391,6 +402,12 @@ class NotionDesignStore(MCPDesignStoreAdapter):
         if run_client_filter and filters:
             return self._filter_items_locally(items, filters)
         return items
+
+    def _search_pages(self, query: str) -> List[Dict[str, Any]]:
+        tool = self.tool_names.get("search", "notion-search")
+        payload = {"query": query}
+        result = self._call_tool(tool, payload)
+        return _extract_results(result)
 
     def _ensure_idse_id_property(self) -> None:
         if not self.use_idse_id or self._idse_schema_checked:
@@ -640,6 +657,16 @@ def _drop_idse_id(properties: Dict[str, Any], prop_map: Dict[str, Dict[str, str]
     if name in properties:
         return {k: v for k, v in properties.items() if k != name}
     return properties
+
+
+def _pick_page_in_database(results: List[Dict[str, Any]], database_id: str) -> Optional[Dict[str, Any]]:
+    if not results:
+        return None
+    for item in results:
+        parent = item.get("parent") or {}
+        if parent.get("database_id") == database_id or parent.get("data_source_id") == database_id:
+            return item
+    return results[0]
 
 
 def _debug_payload(tool_name: str, payload: Dict[str, Any]) -> None:
