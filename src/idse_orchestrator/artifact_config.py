@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from .design_store import DesignStore, DesignStoreFilesystem
+from .design_store_sqlite import DesignStoreSQLite
 
 
 class ArtifactConfig:
@@ -51,6 +52,20 @@ class ArtifactConfig:
             if not idse_root:
                 raise ValueError("Filesystem backend requires idse_root or base_path.")
             return DesignStoreFilesystem(idse_root)
+
+        if backend == "sqlite":
+            sqlite_config = self.config.get("sqlite", {})
+            db_path_value = (
+                sqlite_config.get("db_path")
+                or self.config.get("sqlite_db_path")
+                or self.config.get("db_path")
+            )
+            idse_root_value = sqlite_config.get("idse_root")
+
+            db_path = Path(db_path_value) if db_path_value else None
+            idse_root_path = Path(idse_root_value) if idse_root_value else idse_root
+
+            return DesignStoreSQLite(db_path=db_path, idse_root=idse_root_path)
 
         if backend == "notion":
             notion_config = self.config.get("notion", {})

@@ -147,6 +147,52 @@ class ProjectWorkspace:
         if create_agent_files:
             self._create_agent_instructions(project_name, stack)
 
+        # If sqlite backend configured, seed database and regenerate views
+        try:
+            from .artifact_config import ArtifactConfig
+
+            config = ArtifactConfig()
+            if config.get_backend() == "sqlite":
+                from .artifact_database import ArtifactDatabase
+                from .design_store import DesignStoreFilesystem
+                from .file_view_generator import FileViewGenerator
+
+                db = ArtifactDatabase(idse_root=self.idse_root)
+                db.ensure_project(project_name, stack=stack, owner=owner)
+                db.ensure_session(
+                    project_name,
+                    session_id,
+                    name=metadata.name,
+                    session_type=metadata.session_type,
+                    description=metadata.description,
+                    is_blueprint=metadata.is_blueprint,
+                    parent_session=metadata.parent_session,
+                    status=metadata.status,
+                )
+                db.save_session_extras(
+                    project_name,
+                    session_id,
+                    collaborators=[c.to_dict() for c in metadata.collaborators],
+                    tags=metadata.tags,
+                )
+
+                stage_paths = {
+                    stage: session_path / folder / filename
+                    for stage, (folder, filename) in DesignStoreFilesystem.STAGE_PATHS.items()
+                }
+                for stage, path in stage_paths.items():
+                    if path.exists():
+                        db.save_artifact(project_name, session_id, stage, path.read_text())
+
+                tracker = StageStateModel(project_path)
+                db.save_state(project_name, tracker.get_status(project_name))
+
+                generator = FileViewGenerator(idse_root=self.idse_root)
+                generator.generate_session(project_name, session_id)
+        except Exception:
+            # SQLite seeding is best-effort; filesystem remains authoritative unless configured.
+            pass
+
         return project_path
 
     def _cleanup_nested_idse(self, project_path: Path) -> None:
