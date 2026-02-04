@@ -33,6 +33,20 @@ class AgentRegistry:
         agents.append(agent_spec)
         self._persist()
 
+    def update_agent(self, agent_id: str, updates: Dict) -> Dict:
+        for agent in self._registry.get("agents", []):
+            if agent.get("id") == agent_id:
+                agent.update(updates)
+                self._persist()
+                return agent
+        raise KeyError(f"Agent not found: {agent_id}")
+
+    def set_agent_mode(self, agent_id: str, mode: str) -> Dict:
+        return self.update_agent(agent_id, {"mode": mode})
+
+    def set_agent_role(self, agent_id: str, role: str) -> Dict:
+        return self.update_agent(agent_id, {"role": role})
+
     def _load(self) -> Dict:
         if not self.registry_path.exists():
             default = {

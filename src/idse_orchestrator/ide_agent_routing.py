@@ -19,10 +19,10 @@ class IDEAgentRouting:
     def __init__(self, registry_path: Optional[str] = None):
         self.registry = AgentRegistry(registry_path)
 
-    def get_agent_for_stage(self, stage: str) -> Optional[str]:
+    def get_agent_for_stage(self, stage: str) -> Optional[Dict]:
         agents = self.registry.get_agents_for_stage(stage)
         if agents:
-            return agents[0]["id"]
+            return agents[0]
         return None
 
     def route_to_agent(self, stage: str, context: Dict) -> Dict:
@@ -36,7 +36,8 @@ class IDEAgentRouting:
         Returns:
             Assignment message dictionary
         """
-        agent_id = self.get_agent_for_stage(stage)
+        agent = self.get_agent_for_stage(stage)
+        agent_id = agent.get("id") if agent else None
 
         if not agent_id:
             raise ValueError(f"No agent found for stage: {stage}")

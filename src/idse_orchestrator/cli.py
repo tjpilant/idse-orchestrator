@@ -494,6 +494,64 @@ def describe(ctx):
 
 
 @main.group()
+def agents():
+    """Manage IDE agent registry."""
+    pass
+
+
+@agents.command("list")
+def agents_list():
+    """List registered IDE agents."""
+    from .agent_registry import AgentRegistry
+
+    registry = AgentRegistry()
+    agents = registry.list_agents()
+    if not agents:
+        click.echo("No agents registered.")
+        return
+
+    click.echo("🤖 Agent Registry")
+    for agent in agents:
+        agent_id = agent.get("id", "unknown")
+        role = agent.get("role", "unknown")
+        mode = agent.get("mode", "unknown")
+        stages = ", ".join(agent.get("stages", []))
+        click.echo(f" - {agent_id} | role: {role} | mode: {mode} | stages: {stages}")
+
+
+@agents.command("set-mode")
+@click.argument("agent_id")
+@click.argument("mode", type=click.Choice(["planning", "implementation"], case_sensitive=False))
+def agents_set_mode(agent_id: str, mode: str):
+    """Set agent mode (planning or implementation)."""
+    from .agent_registry import AgentRegistry
+
+    registry = AgentRegistry()
+    try:
+        updated = registry.set_agent_mode(agent_id, mode.lower())
+    except KeyError as e:
+        click.echo(f"❌ Error: {e}", err=True)
+        sys.exit(1)
+    click.echo(f"✅ Updated {updated.get('id')} mode → {updated.get('mode')}")
+
+
+@agents.command("set-role")
+@click.argument("agent_id")
+@click.argument("role")
+def agents_set_role(agent_id: str, role: str):
+    """Set agent role label."""
+    from .agent_registry import AgentRegistry
+
+    registry = AgentRegistry()
+    try:
+        updated = registry.set_agent_role(agent_id, role)
+    except KeyError as e:
+        click.echo(f"❌ Error: {e}", err=True)
+        sys.exit(1)
+    click.echo(f"✅ Updated {updated.get('id')} role → {updated.get('role')}")
+
+
+@main.group()
 def docs():
     """Manage local IDSE reference docs and templates."""
     pass
@@ -1104,8 +1162,15 @@ def status(ctx, project: Optional[str]):
 
         for stage, status in state["stages"].items():
             icon = "✅" if status == "completed" else "🔄" if status == "in_progress" else "⏳"
-            agent_id = router.get_agent_for_stage(stage)
-            agent_hint = f"  → {agent_id}" if agent_id else ""
+            agent = router.get_agent_for_stage(stage)
+            agent_id = agent.get("id") if agent else None
+            agent_mode = agent.get("mode") if agent else None
+            if agent_id and agent_mode:
+                agent_hint = f"  → {agent_id} ({agent_mode})"
+            elif agent_id:
+                agent_hint = f"  → {agent_id}"
+            else:
+                agent_hint = ""
             click.echo(f"  {icon} {stage.ljust(15)}: {status.ljust(12)}{agent_hint}")
 
         click.echo("")
