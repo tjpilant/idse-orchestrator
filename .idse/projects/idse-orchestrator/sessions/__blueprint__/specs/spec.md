@@ -92,7 +92,7 @@ exist (created from templates if needed).
 
 **MUST** respect configuration from:
 - `~/.idseconfig.json`
-- Environment variables (`IDSE_AGENCY_URL`, etc.)
+- Environment variables (`IDSE_ARTIFACT_URL`, etc.)
 
 **MUST** update `last_sync` in `session_state.json`.
 
