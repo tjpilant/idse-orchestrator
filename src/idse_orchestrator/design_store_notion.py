@@ -18,6 +18,7 @@ class NotionDesignStore(MCPDesignStoreAdapter):
         "create_page": "notion-create-page",
         "update_page": "notion-update-page",
         "append_children": "append_block_children",
+        "update_data_source": "notion-update-data-source",
     }
 
     DEFAULT_PROPERTIES = {
@@ -51,6 +52,7 @@ class NotionDesignStore(MCPDesignStoreAdapter):
         self.data_source_id = data_source_id
         self.debug = False
         self.use_idse_id = True
+        self._idse_schema_checked = False
         self.tool_names = {**self.DEFAULT_TOOL_NAMES, **(tool_names or {})}
         self.properties = self._normalize_properties(
             {**self.DEFAULT_PROPERTIES, **(properties or {})}
@@ -87,6 +89,7 @@ class NotionDesignStore(MCPDesignStoreAdapter):
         return self._extract_property_text(page, "content")
 
     def save_artifact(self, project: str, session_id: str, stage: str, content: str) -> None:
+        self._ensure_idse_id_property()
         page = self._query_artifact_page(project, session_id, stage)
         title_prop = self.properties.get("title")
         title_value = f"{stage.title()} – {project} – {session_id}"
@@ -328,6 +331,7 @@ class NotionDesignStore(MCPDesignStoreAdapter):
     def _query_artifact_page(
         self, project: str, session_id: str, stage: str
     ) -> Optional[Dict[str, Any]]:
+        self._ensure_idse_id_property()
         filters = [
             self._property_filter(
                 "idse_id", _make_idse_id(project, session_id, stage)
@@ -387,6 +391,31 @@ class NotionDesignStore(MCPDesignStoreAdapter):
         if run_client_filter and filters:
             return self._filter_items_locally(items, filters)
         return items
+
+    def _ensure_idse_id_property(self) -> None:
+        if not self.use_idse_id or self._idse_schema_checked:
+            return
+        tool = self.tool_names.get("update_data_source")
+        if not tool:
+            return
+        data_source_id = self.data_source_id or self.database_id
+        if not data_source_id:
+            return
+        payload = {
+            "data_source_id": data_source_id,
+            "properties": {
+                self.properties["idse_id"]["name"]: {"rich_text": {}}
+            },
+        }
+        if self.debug:
+            _debug_payload(tool, payload)
+        try:
+            result = self._call_tool(tool, payload)
+            if self.debug:
+                _debug_result(tool, result)
+        except Exception:
+            self.use_idse_id = False
+        self._idse_schema_checked = True
 
     def _filter_items_locally(
         self, items: List[Dict[str, Any]], filters: List[Dict[str, Any]]
