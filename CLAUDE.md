@@ -10,6 +10,12 @@ If you are running in **planning mode**, ignore implementation-only directives b
 In planning mode, you should only update Intent/Context/Spec/Plan/Tasks and request
 a handoff for implementation.
 
+## Agent Registry Mode
+
+If `agent_registry.json` is present, read your assigned entry.  
+If your `mode` is `planning`, follow planning-mode behavior.  
+If your `mode` is `implementation`, focus on implementing tasks and avoid altering Intent/Context/Spec/Plan unless explicitly requested.
+
 ### Before Writing ANY Code
 
 **MANDATORY WORKFLOW:**

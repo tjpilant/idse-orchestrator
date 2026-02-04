@@ -40,9 +40,15 @@ class AgentRegistry:
                     {
                         "id": "claude-code",
                         "role": "orchestrator",
+                        "mode": "planning",
                         "stages": ["intent", "context", "spec", "plan", "tasks", "feedback"],
                     },
-                    {"id": "gpt-codex", "role": "implementer", "stages": ["implementation"]},
+                    {
+                        "id": "gpt-codex",
+                        "role": "implementer",
+                        "mode": "implementation",
+                        "stages": ["implementation"],
+                    },
                 ]
             }
             # Persist defaults for project-level registries
