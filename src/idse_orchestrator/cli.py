@@ -495,8 +495,121 @@ def describe(ctx):
 
 @main.group()
 def agents():
-    """Manage IDE agent registry."""
+    """Manage IDE agent registry and tool hooks."""
     pass
+
+
+@agents.command("install-hooks")
+@click.option("--force", is_flag=True, help="Overwrite existing hooks")
+@click.pass_context
+def install_hooks(ctx, force: bool):
+    """
+    Install Claude Code hooks for Agent Mode enforcement.
+
+    Copies hook scripts to .claude/hooks/ and updates .claude/settings.local.json
+    to enforce 'planning' vs 'implementation' mode restrictions.
+
+    Example:
+        idse agents install-hooks
+    """
+    import shutil
+    import json
+    from pathlib import Path
+    
+    # 1. Locate resource
+    pkg_root = Path(__file__).resolve().parent
+    hook_src = pkg_root / "resources" / "hooks" / "enforce-agent-mode.sh"
+    
+    if not hook_src.exists():
+        click.echo("❌ Error: Bundled hook script not found.", err=True)
+        sys.exit(1)
+
+    # 2. Determine target
+    # Assume we are in the project root or look for .claude dir
+    project_root = Path.cwd()
+    claude_dir = project_root / ".claude"
+    hooks_dir = claude_dir / "hooks"
+    
+    if not claude_dir.exists():
+        click.echo(f"⚠️  No .claude directory found at {project_root}. Creating it...")
+        claude_dir.mkdir(parents=True, exist_ok=True)
+    
+    hooks_dir.mkdir(exist_ok=True)
+    target_script = hooks_dir / "enforce-agent-mode.sh"
+
+    # 3. Copy hook script
+    if target_script.exists() and not force:
+        click.echo(f"ℹ️  Hook script already exists at {target_script}. Use --force to overwrite.")
+    else:
+        shutil.copy2(hook_src, target_script)
+        target_script.chmod(0o755)  # Make executable
+        click.echo(f"✅ Installed hook script: {target_script}")
+
+    # 4. Update settings.local.json
+    settings_file = claude_dir / "settings.local.json"
+    settings = {}
+    
+    if settings_file.exists():
+        try:
+            with open(settings_file, "r") as f:
+                settings = json.load(f)
+        except json.JSONDecodeError:
+            click.echo(f"⚠️  Warning: Could not parse {settings_file}. Starting with empty settings.")
+
+    # Ensure structure exists
+    if "hooks" not in settings:
+        settings["hooks"] = {}
+    if "PreToolUse" not in settings["hooks"]:
+        settings["hooks"]["PreToolUse"] = []
+
+    # Define the hook configurations
+    hook_configs = [
+        {
+            "matcher": "Edit|Write|MultiEdit",
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/enforce-agent-mode.sh"
+                }
+            ]
+        },
+        {
+            "matcher": "Bash",
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/enforce-agent-mode.sh"
+                }
+            ]
+        }
+    ]
+
+    # Merge hooks (avoid duplicates)
+    existing_hooks = settings["hooks"]["PreToolUse"]
+    updated = False
+    
+    for new_hook in hook_configs:
+        is_duplicate = False
+        for i, exist in enumerate(existing_hooks):
+            # Simple deduplication based on matcher
+            if exist.get("matcher") == new_hook["matcher"]:
+                # Check if command matches
+                cmds = exist.get("hooks", [])
+                if any(h.get("command", "").endswith("enforce-agent-mode.sh") for h in cmds):
+                     is_duplicate = True
+                     break
+        
+        if not is_duplicate:
+            existing_hooks.append(new_hook)
+            updated = True
+
+    if updated:
+        with open(settings_file, "w") as f:
+            json.dump(settings, f, indent=2)
+        click.echo(f"✅ Updated {settings_file} with pre-tool hooks.")
+    else:
+        click.echo(f"ℹ️  Settings already configured.")
+
 
 
 @agents.command("list")

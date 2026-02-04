@@ -179,6 +179,15 @@ Validate pipeline artifacts for constitutional compliance.
 
 Display current project and session status.
 
+### `idse agents`
+
+Manage IDE agent registry and governance.
+
+**Subcommands:**
+- `list`: Show registered agents and their modes.
+- `set-mode <agent-id> <mode>`: Switch between `planning` (read-only tools) and `implementation` (full access).
+- `install-hooks`: Install local hooks (e.g., for Claude Code) to enforce mode restrictions.
+
 ## Architecture
 
 ### Project Structure

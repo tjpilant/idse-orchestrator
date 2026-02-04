@@ -55,3 +55,46 @@ IDSE uses a multi-agent conceptual model:
 All Agents follow the IDSE Constitution (intent supremacy, context alignment,
 spec completeness, test-first, simplicity, transparency, plan-before-build,
 atomic tasking, feedback incorporation).
+
+## Agent Mode Enforcement
+
+To prevent design drift, IDSE distinguishes between **Planning Mode** and **Implementation Mode**:
+
+1. **Planning Mode**:
+   - Focus: Updating `intents/`, `specs/`, `plans/` artifacts.
+   - Restrictions: **Cannot** edit code files or execute bash commands (except read-only).
+   - Hook: Blocked by `.claude/hooks/enforce-agent-mode.sh`.
+
+2. **Implementation Mode**:
+   - Focus: Writing code (`src/`), running tests, executing `tasks/`.
+   - Access: Full access to Edit, Write, and Bash tools.
+   - Requirement: Must follow the plan strictly.
+
+### Managing Modes
+
+Modes are defined in `agent_registry.json` and enforced alongside the IDE configuration.
+
+```bash
+# Install enforcement hooks (one-time setup)
+idse agents install-hooks
+
+# Switch agent to implementation mode
+idse agents set-mode claude-code implementation
+
+# Switch agent back to planning mode
+idse agents set-mode claude-code planning
+```
+
+**Registry Schema:**
+```json
+{
+  "agents": [
+    {
+      "id": "claude-code",
+      "role": "orchestrator",
+      "mode": "planning",   <-- Controls tool access
+      "stages": ["intent", "context", "spec", "plan"]
+    }
+  ]
+}
+```
