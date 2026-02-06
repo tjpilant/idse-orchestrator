@@ -14,7 +14,3 @@ venv/
 .env
 .vscode/
 mnt/
-.idse/idse.db
-.idse/idse.db-journal
-.idse/projects/*/session_state.json
-.idse/projects/*/CURRENT_SESSION
