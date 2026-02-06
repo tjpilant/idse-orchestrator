@@ -1723,6 +1723,10 @@ def status(ctx, project: Optional[str]):
     from .stage_state_model import StageStateModel
     from .ide_agent_routing import IDEAgentRouting
     from .artifact_config import ArtifactConfig
+    from .artifact_database import ArtifactDatabase
+    from .design_store_sqlite import DesignStoreSQLite
+    from .file_view_generator import FileViewGenerator
+    from .project_workspace import ProjectWorkspace
 
     try:
         config = ArtifactConfig(
@@ -1732,10 +1736,46 @@ def status(ctx, project: Optional[str]):
         backend = config.get_backend()
         store = None
         if backend == "sqlite":
+            manager = ProjectWorkspace()
+            try:
+                ArtifactDatabase(idse_root=manager.idse_root, allow_create=False)
+            except FileNotFoundError as exc:
+                legacy = (manager.idse_root / "projects").exists()
+                if legacy:
+                    click.echo("❌ Error: Legacy project detected. Run 'idse migrate' to convert to SQLite.", err=True)
+                else:
+                    click.echo(str(exc), err=True)
+                sys.exit(1)
             store = config.get_design_store()
 
         tracker = StageStateModel(store=store, project_name=project)
-        state = tracker.get_status(project)
+        try:
+            state = tracker.get_status(project)
+        except FileNotFoundError:
+            # If local view files are missing but SQLite exists, regenerate and retry.
+            manager = ProjectWorkspace()
+            project_path = manager.projects_root / project if project else manager.get_current_project()
+            if project_path:
+                project_name = project_path.name
+                db = ArtifactDatabase(idse_root=manager.idse_root, allow_create=False)
+                current_session = db.get_current_session(project_name)
+                if not current_session:
+                    raise FileNotFoundError(
+                        "Database missing current session. Run 'idse init' or 'idse migrate'."
+                    )
+                store = DesignStoreSQLite(idse_root=manager.idse_root, allow_create=False)
+                tracker = StageStateModel(
+                    project_path=project_path,
+                    store=store,
+                    project_name=project_name,
+                    session_id=current_session,
+                )
+                tracker.refresh_state_file()
+                FileViewGenerator(idse_root=manager.idse_root, allow_create=False).generate_agent_registry(project_name)
+                state = tracker.get_status(project_name)
+                backend = "sqlite"
+            else:
+                raise
         router = IDEAgentRouting()
 
         click.echo("📊 IDSE Project Status")
