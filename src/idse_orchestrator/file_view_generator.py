@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 import json
+import re
 
 from .artifact_database import ArtifactDatabase
 from .design_store import DesignStoreFilesystem
@@ -102,6 +103,8 @@ class FileViewGenerator:
             "| Session ID | Type | Status | Owner | Created | Progress |",
             "|------------|------|--------|-------|---------|----------|",
         ] + matrix_rows)
+        delivery_summary = self._build_delivery_summary(project, sessions)
+        feedback_summary = self._build_feedback_summary(project, sessions)
 
         content = f"""# {project} - Blueprint Session Meta
 
@@ -136,6 +139,14 @@ All Feature Sessions inherit from this Blueprint's context and specs.
 
 Feedback from Feature Sessions flows upward to inform Blueprint updates.
 
+## Delivery Summary
+
+{delivery_summary}
+
+## Feedback & Lessons Learned
+
+{feedback_summary}
+
 ---
 *Last updated: {_now()}*
 """
@@ -144,8 +155,178 @@ Feedback from Feature Sessions flows upward to inform Blueprint updates.
         blueprint_meta.write_text(content)
         return blueprint_meta
 
+    def _build_delivery_summary(self, project: str, sessions: List[Dict]) -> str:
+        lines: List[str] = []
+        for meta in sessions:
+            session_id = meta["session_id"]
+            if session_id == "__blueprint__":
+                continue
+            if not self._session_is_reportable(project, session_id):
+                continue
+            summary_items = self._extract_implementation_summary(project, session_id)
+            if summary_items:
+                lines.append(f"- `{session_id}`: {'; '.join(summary_items)}")
+        if not lines:
+            return "- No implementation summaries recorded yet."
+        return "\n".join(lines)
+
+    def _build_feedback_summary(self, project: str, sessions: List[Dict]) -> str:
+        lines: List[str] = []
+        for meta in sessions:
+            session_id = meta["session_id"]
+            if session_id == "__blueprint__":
+                continue
+            if not self._session_is_reportable(project, session_id):
+                continue
+            summary_items = self._extract_feedback_summary(project, session_id)
+            if summary_items:
+                lines.append(f"- `{session_id}`: {'; '.join(summary_items)}")
+        if not lines:
+            return "- No feedback summaries recorded yet."
+        return "\n".join(lines)
+
+    def _extract_implementation_summary(self, project: str, session_id: str) -> List[str]:
+        try:
+            content = self.db.load_artifact(project, session_id, "implementation").content
+        except FileNotFoundError:
+            return []
+
+        if "[REQUIRES INPUT]" in content:
+            return []
+
+        section = _extract_markdown_section_variants(
+            content, ["Summary", "Executive Summary"]
+        )
+        if section:
+            bullets = _extract_bullets(section)
+            if bullets:
+                return [_truncate(item, 200) for item in bullets[:3]]
+
+        # Fallback: first sentence-like line in the implementation artifact.
+        for line in content.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            if _is_placeholder_text(stripped):
+                continue
+            if len(stripped) >= 12:
+                return [_truncate(stripped, 200)]
+        return []
+
+    def _extract_feedback_summary(self, project: str, session_id: str) -> List[str]:
+        try:
+            content = self.db.load_artifact(project, session_id, "feedback").content
+        except FileNotFoundError:
+            return []
+
+        if "[REQUIRES INPUT]" in content:
+            return []
+
+        section = _extract_markdown_section_variants(
+            content, ["Summary", "Lessons Learned", "Executive Summary"]
+        )
+        if section:
+            bullets = _extract_bullets(section)
+            if bullets:
+                return [_truncate(item, 200) for item in bullets[:3]]
+
+        for line in content.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            if _is_placeholder_text(stripped):
+                continue
+            if len(stripped) >= 12:
+                return [_truncate(stripped, 200)]
+        return []
+
+    def _session_is_reportable(self, project: str, session_id: str) -> bool:
+        # Exclude sessions with no meaningful artifact content. This prevents
+        # placeholders/empty sessions from polluting high-level rollups.
+        found_meaningful = False
+        for stage in DesignStoreFilesystem.STAGE_PATHS:
+            try:
+                content = self.db.load_artifact(project, session_id, stage).content
+            except FileNotFoundError:
+                continue
+            if not content.strip():
+                continue
+            if "[REQUIRES INPUT]" in content:
+                continue
+            if _meaningful_text_length(content) < 40:
+                continue
+            found_meaningful = True
+            break
+        return found_meaningful
+
 
 def _now() -> str:
     from datetime import datetime
 
     return datetime.now().isoformat()
+
+
+def _extract_markdown_section_variants(content: str, section_names: List[str]) -> Optional[str]:
+    normalized_targets = {_normalize_heading_name(name) for name in section_names}
+    lines = content.splitlines()
+    start = None
+    for idx, line in enumerate(lines):
+        heading_match = re.match(r"^\s*#{1,3}\s+(.+?)\s*$", line)
+        if not heading_match:
+            continue
+        heading_name = _normalize_heading_name(heading_match.group(1))
+        if heading_name in normalized_targets:
+            start = idx + 1
+            break
+    if start is None:
+        return None
+
+    end = len(lines)
+    for idx in range(start, len(lines)):
+        if re.match(r"^\s*#{1,3}\s+.+$", lines[idx]):
+            end = idx
+            break
+    return "\n".join(lines[start:end]).strip()
+
+
+def _extract_bullets(section: str) -> List[str]:
+    bullets: List[str] = []
+    for line in section.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("- "):
+            bullets.append(stripped[2:].strip())
+        elif stripped.startswith("* "):
+            bullets.append(stripped[2:].strip())
+    return [item for item in bullets if item and not _is_placeholder_text(item)]
+
+
+def _normalize_heading_name(name: str) -> str:
+    return re.sub(r"\s+", " ", name.strip().lower())
+
+
+def _truncate(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 3)].rstrip() + "..."
+
+
+def _meaningful_text_length(content: str) -> int:
+    text = re.sub(r"```[\s\S]*?```", "", content)
+    text = re.sub(r"`[^`]*`", "", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return len(text)
+
+
+def _is_placeholder_text(text: str) -> bool:
+    lowered = text.strip().lower()
+    if not lowered:
+        return True
+    if "requires input" in lowered:
+        return True
+    if lowered.startswith("todo"):
+        return True
+    if "todo" in lowered:
+        return True
+    if "summarize feedback received" in lowered:
+        return True
+    return False
