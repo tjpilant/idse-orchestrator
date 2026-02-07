@@ -263,7 +263,9 @@ class SessionManager:
             owner=owner,
             collaborators=[],
             tags=["legacy"],
-            status="unknown",
+            # Legacy sessions should be representable without violating metadata
+            # validation used by list/statistics commands.
+            status="draft",
             created_at=created_at or "unknown",
             updated_at=created_at or "unknown"
         )

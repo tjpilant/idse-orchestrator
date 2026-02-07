@@ -73,6 +73,27 @@ def test_generate_blueprint_meta_includes_delivery_summary(tmp_path: Path) -> No
 - Added export and query support.
 """,
     )
+    db.save_session_state(
+        project,
+        "sqlite-cms-refactor",
+        {
+            "project_name": project,
+            "session_id": "sqlite-cms-refactor",
+            "is_blueprint": False,
+            "stages": {
+                "intent": "completed",
+                "context": "completed",
+                "spec": "completed",
+                "plan": "completed",
+                "tasks": "completed",
+                "implementation": "completed",
+                "feedback": "completed",
+            },
+            "last_sync": None,
+            "validation_status": "passing",
+            "created_at": "2026-02-07T00:00:00",
+        },
+    )
 
     generator = FileViewGenerator(idse_root=idse_root)
     meta_path = generator.generate_blueprint_meta(project)
@@ -81,6 +102,8 @@ def test_generate_blueprint_meta_includes_delivery_summary(tmp_path: Path) -> No
     assert "## Delivery Summary" in meta_content
     assert "`sqlite-cms-refactor`" in meta_content
     assert "Added sqlite backend and migration flow." in meta_content
+    assert "| sqlite-cms-refactor | feature | complete | system |" in meta_content
+    assert "| 100% |" in meta_content
 
 
 def test_generate_blueprint_meta_includes_feedback_rollup(tmp_path: Path) -> None:

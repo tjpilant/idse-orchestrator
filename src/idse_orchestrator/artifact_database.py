@@ -111,17 +111,6 @@ class ArtifactDatabase:
         project_id = self.ensure_project(project)
         now = _now()
 
-        if is_blueprint is None:
-            is_blueprint = session_id == "__blueprint__"
-        if session_type is None:
-            session_type = "blueprint" if is_blueprint else "feature"
-        if status is None:
-            status = "draft"
-        if name is None:
-            name = session_id
-        if owner is None:
-            owner = "system"
-
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT id FROM sessions WHERE project_id = ? AND session_id = ?;",
@@ -134,7 +123,7 @@ class ArtifactDatabase:
                     ("name", name),
                     ("session_type", session_type),
                     ("description", description),
-                    ("is_blueprint", 1 if is_blueprint else 0),
+                    ("is_blueprint", (1 if is_blueprint else 0) if is_blueprint is not None else None),
                     ("parent_session", parent_session),
                     ("status", status),
                     ("owner", owner),
@@ -151,6 +140,12 @@ class ArtifactDatabase:
                         params,
                     )
                 return int(row["id"])
+
+            insert_is_blueprint = is_blueprint if is_blueprint is not None else (session_id == "__blueprint__")
+            insert_session_type = session_type if session_type is not None else ("blueprint" if insert_is_blueprint else "feature")
+            insert_status = status if status is not None else "draft"
+            insert_name = name if name is not None else session_id
+            insert_owner = owner if owner is not None else "system"
 
             conn.execute(
                 """
@@ -172,13 +167,13 @@ class ArtifactDatabase:
                 (
                     project_id,
                     session_id,
-                    name,
-                    session_type,
+                    insert_name,
+                    insert_session_type,
                     description,
-                    1 if is_blueprint else 0,
+                    1 if insert_is_blueprint else 0,
                     parent_session,
-                    owner,
-                    status,
+                    insert_owner,
+                    insert_status,
                     now,
                     now,
                 ),
@@ -471,6 +466,12 @@ class ArtifactDatabase:
         agents = registry.get("agents", [])
 
         with self._connect() as conn:
+            # Preserve explicit registry ordering by replacing rows for this project.
+            conn.execute(
+                "DELETE FROM agent_stages WHERE agent_id IN (SELECT id FROM agents WHERE project_id = ?);",
+                (project_id,),
+            )
+            conn.execute("DELETE FROM agents WHERE project_id = ?;", (project_id,))
             for agent in agents:
                 agent_id = agent.get("id")
                 if not agent_id:
@@ -480,9 +481,7 @@ class ArtifactDatabase:
                 conn.execute(
                     """
                     INSERT INTO agents (project_id, agent_id, role, mode, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(project_id, agent_id)
-                    DO UPDATE SET role = excluded.role, mode = excluded.mode, updated_at = excluded.updated_at;
+                    VALUES (?, ?, ?, ?, ?, ?);
                     """,
                     (project_id, agent_id, role, mode, now, now),
                 )
@@ -508,7 +507,7 @@ class ArtifactDatabase:
         registry = {"agents": []}
         with self._connect() as conn:
             agents = conn.execute(
-                "SELECT id, agent_id, role, mode FROM agents WHERE project_id = ?;",
+                "SELECT id, agent_id, role, mode FROM agents WHERE project_id = ? ORDER BY id ASC;",
                 (project_id,),
             ).fetchall()
             for agent in agents:

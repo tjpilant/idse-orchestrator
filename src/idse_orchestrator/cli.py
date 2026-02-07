@@ -1130,6 +1130,50 @@ def session():
     pass
 
 
+def _sync_session_metadata_to_sqlite(project_name: str, metadata, *, idse_root: Path) -> None:
+    """Persist session metadata changes into SQLite source of truth."""
+    from .artifact_database import ArtifactDatabase
+    from .file_view_generator import FileViewGenerator
+
+    db = ArtifactDatabase(idse_root=idse_root, allow_create=False)
+    db.ensure_session(
+        project_name,
+        metadata.session_id,
+        name=metadata.name,
+        session_type=metadata.session_type,
+        description=metadata.description,
+        is_blueprint=metadata.is_blueprint,
+        parent_session=metadata.parent_session,
+        owner=metadata.owner,
+        status=metadata.status,
+    )
+    db.save_session_extras(
+        project_name,
+        metadata.session_id,
+        collaborators=[c.to_dict() for c in metadata.collaborators],
+        tags=metadata.tags,
+    )
+    FileViewGenerator(idse_root=idse_root, allow_create=False).generate_blueprint_meta(project_name)
+
+
+def _resolve_project_path(project: Optional[str]) -> tuple["ProjectWorkspace", Path, str]:
+    from .project_workspace import ProjectWorkspace
+
+    manager = ProjectWorkspace()
+    if project:
+        project_path = manager.projects_root / project
+    else:
+        project_path = manager.get_current_project()
+        if not project_path:
+            raise FileNotFoundError("Not in an IDSE project directory")
+        project = project_path.name
+
+    if not project_path.exists():
+        raise FileNotFoundError(f"Project '{project}' not found")
+
+    return manager, project_path, project
+
+
 @session.command("create")
 @click.argument("session_name", required=False)
 @click.option("--project", help="Project name (uses current if not specified)")
@@ -1336,6 +1380,175 @@ def switch_session(ctx, session_id: str, project: str):
             click.echo("📘 Blueprint meta.md refreshed.")
         except Exception as meta_err:
             click.echo(f"⚠️  Warning: Failed to refresh blueprint meta: {meta_err}", err=True)
+
+
+@session.command("set-owner")
+@click.argument("session_id")
+@click.option("--owner", required=True, help="Owner name")
+@click.option("--project", help="Project name (uses current if not specified)")
+@click.pass_context
+def set_owner(ctx, session_id: str, owner: str, project: Optional[str]):
+    """Set session owner in metadata and SQLite."""
+    from .artifact_config import ArtifactConfig
+    from .session_metadata import SessionMetadata
+
+    try:
+        manager, project_path, project_name = _resolve_project_path(project)
+        session_path = project_path / "sessions" / session_id
+        if not session_path.exists():
+            click.echo(f"❌ Error: Session '{session_id}' not found in project '{project_name}'", err=True)
+            sys.exit(1)
+
+        metadata = SessionMetadata.load(session_path)
+        metadata.update(session_path, owner=owner)
+
+        config = ArtifactConfig(
+            ctx.obj.get("config_path") if ctx.obj else None,
+            backend_override=ctx.obj.get("backend_override") if ctx.obj else None,
+        )
+        if config.get_storage_backend() == "sqlite":
+            _sync_session_metadata_to_sqlite(project_name, metadata, idse_root=manager.idse_root)
+
+        click.echo(f"✅ Owner updated for {project_name}/{session_id}: {owner}")
+    except Exception as e:
+        click.echo(f"❌ Error: {e}", err=True)
+        sys.exit(1)
+
+
+@session.command("add-collaborator")
+@click.argument("session_id")
+@click.option("--name", required=True, help="Collaborator name")
+@click.option(
+    "--role",
+    type=click.Choice(["owner", "contributor", "reviewer", "viewer"], case_sensitive=False),
+    default="contributor",
+    show_default=True,
+    help="Collaborator role",
+)
+@click.option("--project", help="Project name (uses current if not specified)")
+@click.pass_context
+def add_collaborator(ctx, session_id: str, name: str, role: str, project: Optional[str]):
+    """Add collaborator to a session in metadata and SQLite."""
+    from .artifact_config import ArtifactConfig
+    from .session_metadata import SessionMetadata
+
+    try:
+        manager, project_path, project_name = _resolve_project_path(project)
+        session_path = project_path / "sessions" / session_id
+        if not session_path.exists():
+            click.echo(f"❌ Error: Session '{session_id}' not found in project '{project_name}'", err=True)
+            sys.exit(1)
+
+        metadata = SessionMetadata.load(session_path)
+        metadata.add_collaborator(session_path, name=name, role=role.lower())
+
+        config = ArtifactConfig(
+            ctx.obj.get("config_path") if ctx.obj else None,
+            backend_override=ctx.obj.get("backend_override") if ctx.obj else None,
+        )
+        if config.get_storage_backend() == "sqlite":
+            _sync_session_metadata_to_sqlite(project_name, metadata, idse_root=manager.idse_root)
+
+        click.echo(f"✅ Collaborator added for {project_name}/{session_id}: {name} ({role.lower()})")
+    except Exception as e:
+        click.echo(f"❌ Error: {e}", err=True)
+        sys.exit(1)
+
+
+@session.command("remove-collaborator")
+@click.argument("session_id")
+@click.option("--name", required=True, help="Collaborator name")
+@click.option("--project", help="Project name (uses current if not specified)")
+@click.pass_context
+def remove_collaborator(ctx, session_id: str, name: str, project: Optional[str]):
+    """Remove collaborator from a session in metadata and SQLite."""
+    from .artifact_config import ArtifactConfig
+    from .session_metadata import SessionMetadata
+
+    try:
+        manager, project_path, project_name = _resolve_project_path(project)
+        session_path = project_path / "sessions" / session_id
+        if not session_path.exists():
+            click.echo(f"❌ Error: Session '{session_id}' not found in project '{project_name}'", err=True)
+            sys.exit(1)
+
+        metadata = SessionMetadata.load(session_path)
+        metadata.remove_collaborator(session_path, name=name)
+
+        config = ArtifactConfig(
+            ctx.obj.get("config_path") if ctx.obj else None,
+            backend_override=ctx.obj.get("backend_override") if ctx.obj else None,
+        )
+        if config.get_storage_backend() == "sqlite":
+            _sync_session_metadata_to_sqlite(project_name, metadata, idse_root=manager.idse_root)
+
+        click.echo(f"✅ Collaborator removed for {project_name}/{session_id}: {name}")
+    except Exception as e:
+        click.echo(f"❌ Error: {e}", err=True)
+        sys.exit(1)
+
+
+@session.command("set-status")
+@click.argument("session_id")
+@click.option(
+    "--status",
+    "session_status",
+    required=True,
+    type=click.Choice(["draft", "in_progress", "review", "complete", "archived"], case_sensitive=False),
+    help="Session status",
+)
+@click.option("--project", help="Project name (uses current if not specified)")
+@click.pass_context
+def set_status(ctx, session_id: str, session_status: str, project: Optional[str]):
+    """Set session status in metadata and SQLite."""
+    from .artifact_config import ArtifactConfig
+    from .session_metadata import SessionMetadata
+    from .stage_state_model import StageStateModel
+    from .design_store_sqlite import DesignStoreSQLite
+
+    try:
+        manager, project_path, project_name = _resolve_project_path(project)
+        session_path = project_path / "sessions" / session_id
+        if not session_path.exists():
+            click.echo(f"❌ Error: Session '{session_id}' not found in project '{project_name}'", err=True)
+            sys.exit(1)
+
+        normalized_status = session_status.lower()
+        metadata = SessionMetadata.load(session_path)
+        metadata.update(session_path, status=normalized_status)
+
+        config = ArtifactConfig(
+            ctx.obj.get("config_path") if ctx.obj else None,
+            backend_override=ctx.obj.get("backend_override") if ctx.obj else None,
+        )
+        if config.get_storage_backend() == "sqlite":
+            _sync_session_metadata_to_sqlite(project_name, metadata, idse_root=manager.idse_root)
+            tracker = StageStateModel(
+                project_path=project_path,
+                store=DesignStoreSQLite(idse_root=manager.idse_root, allow_create=False),
+                project_name=project_name,
+                session_id=session_id,
+            )
+            try:
+                tracker.get_status(project_name)
+            except FileNotFoundError:
+                tracker.init_state(project_name, session_id, is_blueprint=metadata.is_blueprint)
+        else:
+            tracker = StageStateModel(project_path=project_path, session_id=session_id)
+            try:
+                tracker.get_status(project_name)
+            except FileNotFoundError:
+                tracker.init_state(project_name, session_id, is_blueprint=metadata.is_blueprint)
+
+        if normalized_status == "complete":
+            for stage in tracker.STAGE_NAMES:
+                tracker.update_stage(stage, "completed")
+            tracker.set_validation_status("passing")
+
+        click.echo(f"✅ Status updated for {project_name}/{session_id}: {normalized_status}")
+    except Exception as e:
+        click.echo(f"❌ Error: {e}", err=True)
+        sys.exit(1)
 
 
 @main.command()

@@ -4,6 +4,7 @@
 - 2026-02-07: Requested mission-report style blueprint rollup capturing both deliverables and lessons learned.
 - 2026-02-07: Requested stronger extraction to avoid placeholder noise and overlong bullets in high-level meta view.
 - 2026-02-07: Requested explicit split where SQLite is core storage and Notion/filesystem are sync targets only.
+- 2026-02-07: Requested command-driven owner/collaborator management to avoid manual `session.json` edits.
 
 ## Impacted Artifacts
 - Intent: No changes
@@ -20,6 +21,7 @@
 ## Actions / Follow-ups
 - Populate `notion-designstore-refactor` implementation and feedback artifacts with real content so it appears in blueprint summaries.
 - Migrate configs to `storage_backend` + `sync_backend`; keep `artifact_backend` as legacy compatibility only.
+- Keep session identity metadata changes behind CLI commands and mirror updates to SQLite.
 
 ## Decision Log
 - Added `Feedback & Lessons Learned` rollup to blueprint meta.
@@ -28,3 +30,6 @@
   - Storage default remains SQLite (`storage_backend`).
   - Sync target uses independent `sync_backend`.
   - Legacy `artifact_backend=notion` no longer overrides storage backend.
+- Session metadata edit path adopted:
+  - Owner/collaborators updated via `idse session ...` commands.
+  - Changes persisted to `session.json` and mirrored into SQLite (`sessions` + `collaborators` tables).

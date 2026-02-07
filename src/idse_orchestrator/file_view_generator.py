@@ -93,9 +93,10 @@ class FileViewGenerator:
             else:
                 description = meta.get("description") or "Feature session"
                 registry_lines.append(f"- `{meta['session_id']}` - {description}")
+            progress = self._session_progress(project, meta["session_id"])
             matrix_rows.append(
                 f"| {meta['session_id']} | {meta['session_type']} | {meta['status']} |"
-                f" {meta.get('owner') or 'system'} | {meta['created_at'][:10]} | 0% |"
+                f" {meta.get('owner') or 'system'} | {meta['created_at'][:10]} | {progress}% |"
             )
 
         registry_section = "\n".join(registry_lines) if registry_lines else "(To be added as sessions are created)"
@@ -154,6 +155,20 @@ Feedback from Feature Sessions flows upward to inform Blueprint updates.
         blueprint_meta.parent.mkdir(parents=True, exist_ok=True)
         blueprint_meta.write_text(content)
         return blueprint_meta
+
+    def _session_progress(self, project: str, session_id: str) -> int:
+        try:
+            state = self.db.load_session_state(project, session_id)
+        except FileNotFoundError:
+            return 0
+        stages = state.get("stages") or {}
+        if not stages:
+            return 0
+        completed = sum(1 for value in stages.values() if value == "completed")
+        total = len(stages)
+        if total == 0:
+            return 0
+        return int(round((completed / total) * 100))
 
     def _build_delivery_summary(self, project: str, sessions: List[Dict]) -> str:
         lines: List[str] = []

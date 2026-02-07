@@ -1,6 +1,14 @@
 {
   "agents": [
     {
+      "id": "gpt-codex",
+      "role": "implementer",
+      "mode": "implementation",
+      "stages": [
+        "implementation"
+      ]
+    },
+    {
       "id": "claude-code",
       "role": "orchestrator",
       "mode": "planning",
@@ -15,19 +23,10 @@
     },
     {
       "id": "github-copilot",
-      "role": "implementer",
+      "role": "feedback-reviewer",
       "mode": "implementation",
       "stages": [
-        "feedback",
-        "implementation"
-      ]
-    },
-    {
-      "id": "gpt-codex",
-      "role": "implementer",
-      "mode": "implementation",
-      "stages": [
-        "implementation"
+        "feedback"
       ]
     }
   ]

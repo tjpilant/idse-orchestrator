@@ -54,3 +54,27 @@ def test_artifact_database_crud(tmp_path: Path) -> None:
     state = {"project_name": project, "session_id": session, "stages": {"intent": "completed"}}
     db.save_state(project, state)
     assert db.load_state(project) == state
+
+
+def test_save_session_state_does_not_reset_session_status(tmp_path: Path) -> None:
+    idse_root = tmp_path / ".idse"
+    db = ArtifactDatabase(idse_root=idse_root)
+
+    project = "demo"
+    session = "session-1"
+    db.ensure_session(project, session, status="complete")
+
+    session_state = {
+        "project_name": project,
+        "session_id": session,
+        "is_blueprint": False,
+        "stages": {"intent": "completed"},
+        "last_sync": None,
+        "validation_status": "passing",
+        "created_at": "2026-02-07T00:00:00",
+    }
+    db.save_session_state(project, session, session_state)
+
+    metadata = db.list_session_metadata(project)
+    row = next(item for item in metadata if item["session_id"] == session)
+    assert row["status"] == "complete"
