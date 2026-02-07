@@ -21,7 +21,7 @@ class SessionGraph:
             from .artifact_database import ArtifactDatabase
 
             config = ArtifactConfig()
-            if config.get_backend() == "sqlite":
+            if config.get_storage_backend() == "sqlite":
                 idse_root = self.project_path.parent.parent
                 db = ArtifactDatabase(idse_root=idse_root, allow_create=False)
                 current = db.get_current_session(self.project_path.name)
@@ -52,7 +52,7 @@ class SessionGraph:
             from .stage_state_model import StageStateModel
 
             config = ArtifactConfig()
-            if config.get_backend() != "sqlite":
+            if config.get_storage_backend() != "sqlite":
                 return
             idse_root = self.project_path.parent.parent
             db = ArtifactDatabase(idse_root=idse_root, allow_create=False)
@@ -84,7 +84,7 @@ class SessionGraph:
             from .file_view_generator import FileViewGenerator
 
             config = ArtifactConfig()
-            if config.get_backend() == "sqlite":
+            if config.get_storage_backend() == "sqlite":
                 FileViewGenerator(idse_root=project_path.parent.parent, allow_create=False).generate_blueprint_meta(project_name)
                 return
         except Exception:
@@ -230,7 +230,7 @@ Feedback from Feature Sessions flows upward to inform Blueprint updates.
             from .file_view_generator import FileViewGenerator
 
             config = ArtifactConfig()
-            if config.get_backend() == "sqlite":
+            if config.get_storage_backend() == "sqlite":
                 FileViewGenerator(idse_root=project_path.parent.parent, allow_create=False).generate_blueprint_meta(project_path.name)
                 return
         except Exception:
@@ -272,7 +272,7 @@ Feedback from Feature Sessions flows upward to inform Blueprint updates.
             from .file_view_generator import FileViewGenerator
 
             config = ArtifactConfig()
-            if config.get_backend() == "sqlite":
+            if config.get_storage_backend() == "sqlite":
                 FileViewGenerator(idse_root=project_path.parent.parent, allow_create=False).generate_blueprint_meta(project_path.name)
                 return
         except Exception:

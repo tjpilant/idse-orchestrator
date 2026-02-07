@@ -26,10 +26,6 @@ class ArtifactConfig:
         else:
             config = {}
 
-        env_backend = os.getenv("IDSE_ARTIFACT_BACKEND")
-        if env_backend:
-            config["artifact_backend"] = env_backend
-
         return config
 
     def save(self) -> None:
@@ -37,18 +33,61 @@ class ArtifactConfig:
         with self.config_path.open("w") as f:
             json.dump(self.config, f, indent=2)
 
-    def get_backend(self) -> str:
-        if self.backend_override:
+    def get_storage_backend(self) -> str:
+        """Return backend for local source-of-truth storage operations."""
+        if self.backend_override in {"sqlite", "filesystem"}:
             return self.backend_override
 
-        return (
-            self.config.get("artifact_backend")
-            or self.config.get("backend")
-            or "sqlite"
-        )
+        env_storage = os.getenv("IDSE_STORAGE_BACKEND")
+        if env_storage in {"sqlite", "filesystem"}:
+            return env_storage
 
-    def get_design_store(self, idse_root: Optional[Path] = None) -> DesignStore:
-        backend = self.get_backend()
+        configured_storage = self.config.get("storage_backend")
+        if configured_storage in {"sqlite", "filesystem"}:
+            return configured_storage
+
+        # Legacy compatibility: artifact_backend/backed used to represent storage.
+        legacy_backend = self.config.get("artifact_backend") or self.config.get("backend")
+        if legacy_backend in {"sqlite", "filesystem"}:
+            return legacy_backend
+
+        # SQLite is authoritative by default.
+        return "sqlite"
+
+    def get_sync_backend(self) -> str:
+        """Return backend for sync commands (push/pull/test/tools/describe)."""
+        if self.backend_override in {"sqlite", "filesystem", "notion"}:
+            return self.backend_override
+
+        env_sync = os.getenv("IDSE_SYNC_BACKEND") or os.getenv("IDSE_ARTIFACT_BACKEND")
+        if env_sync in {"sqlite", "filesystem", "notion"}:
+            return env_sync
+
+        configured_sync = self.config.get("sync_backend")
+        if configured_sync in {"sqlite", "filesystem", "notion"}:
+            return configured_sync
+
+        # Legacy compatibility for old configs.
+        legacy_backend = self.config.get("artifact_backend") or self.config.get("backend")
+        if legacy_backend in {"sqlite", "filesystem", "notion"}:
+            return legacy_backend
+
+        # Safe default for sync if no explicit target has been configured.
+        return "filesystem"
+
+    def get_backend(self) -> str:
+        """
+        Backward-compatible alias.
+
+        Historically this represented the single artifact backend. We now keep this
+        as storage backend to preserve behavior for non-sync commands.
+        """
+        return self.get_storage_backend()
+
+    def get_design_store(self, idse_root: Optional[Path] = None, purpose: str = "storage") -> DesignStore:
+        if purpose not in {"storage", "sync"}:
+            raise ValueError(f"Unknown design store purpose: {purpose}")
+        backend = self.get_storage_backend() if purpose == "storage" else self.get_sync_backend()
         if backend == "filesystem":
             base_path = self.config.get("base_path")
             if base_path:

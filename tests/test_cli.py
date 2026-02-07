@@ -37,7 +37,7 @@ def test_cli_export_sqlite(tmp_path):
 
         config_path = Path(".") / ".idseconfig.json"
         config_path.write_text(
-            '{"artifact_backend": "sqlite", "sqlite": {"db_path": ".idse/idse.db"}}'
+            '{"storage_backend": "sqlite", "sqlite": {"db_path": ".idse/idse.db"}}'
         )
 
         result = runner.invoke(
@@ -65,7 +65,7 @@ def test_cli_query_sessions(tmp_path):
 
         config_path = Path(".") / ".idseconfig.json"
         config_path.write_text(
-            '{"artifact_backend": "sqlite", "sqlite": {"db_path": ".idse/idse.db"}}'
+            '{"storage_backend": "sqlite", "sqlite": {"db_path": ".idse/idse.db"}}'
         )
 
         result = runner.invoke(
@@ -91,7 +91,7 @@ def test_cli_artifact_write_sqlite(tmp_path):
 
         config_path = Path(".") / ".idseconfig.json"
         config_path.write_text(
-            '{"artifact_backend": "sqlite", "sqlite": {"db_path": ".idse/idse.db"}}'
+            '{"storage_backend": "sqlite", "sqlite": {"db_path": ".idse/idse.db"}}'
         )
 
         result = runner.invoke(

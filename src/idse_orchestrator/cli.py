@@ -77,7 +77,7 @@ def init(ctx, project_name: str, stack: str, guided: bool, agentic: Optional[str
             from .artifact_config import ArtifactConfig
 
             config = ArtifactConfig()
-            config.config["artifact_backend"] = backend.lower()
+            config.config["storage_backend"] = backend.lower()
             config.save()
 
         manager = ProjectWorkspace()
@@ -211,9 +211,9 @@ def export(ctx, project: Optional[str], session_id: Optional[str], all_sessions:
     from .session_graph import SessionGraph
 
     config = ArtifactConfig(config_path, backend_override=ctx.obj.get("backend_override"))
-    backend = config.get_backend()
+    backend = config.get_storage_backend()
     if backend != "sqlite":
-        click.echo("❌ Error: export requires sqlite backend (set artifact_backend=sqlite).", err=True)
+        click.echo("❌ Error: export requires sqlite storage backend (set storage_backend=sqlite).", err=True)
         sys.exit(1)
 
     manager = ProjectWorkspace()
@@ -287,9 +287,9 @@ def migrate(ctx, project: Optional[str], sessions: Optional[str], config_path: O
     from .migration import FileToDatabaseMigrator
 
     config = ArtifactConfig(config_path, backend_override=ctx.obj.get("backend_override"))
-    backend = config.get_backend()
+    backend = config.get_storage_backend()
     if backend != "sqlite":
-        click.echo("❌ Error: migrate requires sqlite backend (set artifact_backend=sqlite).", err=True)
+        click.echo("❌ Error: migrate requires sqlite storage backend (set storage_backend=sqlite).", err=True)
         sys.exit(1)
 
     session_list = None
@@ -335,8 +335,8 @@ def query(ctx, query_name: str, project: Optional[str], session_id: Optional[str
     from .project_workspace import ProjectWorkspace
 
     config = ArtifactConfig(config_path, backend_override=ctx.obj.get("backend_override"))
-    if config.get_backend() != "sqlite":
-        click.echo("❌ Error: query requires sqlite backend (set artifact_backend=sqlite).", err=True)
+    if config.get_storage_backend() != "sqlite":
+        click.echo("❌ Error: query requires sqlite storage backend (set storage_backend=sqlite).", err=True)
         sys.exit(1)
 
     manager = ProjectWorkspace()
@@ -459,8 +459,10 @@ def push(ctx, project: Optional[str], session_override: Optional[str], yes: bool
         session_path = project_path / "sessions" / session_id
 
         artifacts = {}
-        backend = ArtifactConfig(ctx.obj.get("config_path"), backend_override=ctx.obj.get("backend_override")).get_backend()
-        use_db = backend == "sqlite"
+        config = ArtifactConfig(ctx.obj.get("config_path"), backend_override=ctx.obj.get("backend_override"))
+        storage_backend = config.get_storage_backend()
+        sync_backend = config.get_sync_backend()
+        use_db = storage_backend == "sqlite"
         db = None
         if use_db:
             db = ArtifactDatabase(idse_root=manager.idse_root, allow_create=False)
@@ -484,8 +486,7 @@ def push(ctx, project: Optional[str], session_override: Optional[str], yes: bool
             if path.exists():
                 artifacts[stage] = path.read_text()
 
-        config = ArtifactConfig(ctx.obj.get("config_path"), backend_override=ctx.obj.get("backend_override"))
-        remote_store = config.get_design_store(manager.idse_root)
+        remote_store = config.get_design_store(manager.idse_root, purpose="sync")
         if debug and hasattr(remote_store, "set_debug"):
             remote_store.set_debug(True)
         if force_create and hasattr(remote_store, "set_force_create"):
@@ -506,6 +507,8 @@ def push(ctx, project: Optional[str], session_override: Optional[str], yes: bool
             return
 
         click.echo(f"📤 Syncing artifacts for {project_name}/{session_id}...")
+        click.echo(f"   Storage: {storage_backend}")
+        click.echo(f"   Sync Target: {sync_backend}")
         pushed = []
         skipped = []
         for stage, content in artifacts.items():
@@ -570,14 +573,15 @@ def pull(ctx, project: Optional[str], session_override: Optional[str], yes: bool
         project_name = project_path.name
         session_id = session_override or SessionGraph(project_path).get_current_session()
 
-        backend = ArtifactConfig(ctx.obj.get("config_path"), backend_override=ctx.obj.get("backend_override")).get_backend()
-        use_db = backend == "sqlite"
+        config = ArtifactConfig(ctx.obj.get("config_path"), backend_override=ctx.obj.get("backend_override"))
+        storage_backend = config.get_storage_backend()
+        sync_backend = config.get_sync_backend()
+        use_db = storage_backend == "sqlite"
         db = None
         if use_db:
             db = ArtifactDatabase(idse_root=manager.idse_root, allow_create=False)
         local_store = DesignStoreFilesystem(manager.idse_root)
-        config = ArtifactConfig(ctx.obj.get("config_path"), backend_override=ctx.obj.get("backend_override"))
-        remote_store = config.get_design_store(manager.idse_root)
+        remote_store = config.get_design_store(manager.idse_root, purpose="sync")
         if use_db:
             tracker = StageStateModel(
                 store=DesignStoreSQLite(idse_root=manager.idse_root, allow_create=False),
@@ -594,6 +598,8 @@ def pull(ctx, project: Optional[str], session_override: Optional[str], yes: bool
             return
 
         click.echo(f"📥 Pulling artifacts for {project_name}/{session_id}...")
+        click.echo(f"   Storage: {storage_backend}")
+        click.echo(f"   Sync Source: {sync_backend}")
         artifacts = {}
         for stage in DesignStoreFilesystem.STAGE_PATHS.keys():
             try:
@@ -634,15 +640,18 @@ def pull(ctx, project: Optional[str], session_override: Optional[str], yes: bool
 @sync.command()
 @click.pass_context
 def setup(ctx):
-    """Configure Artifact Core backend for sync."""
+    """Configure storage/sync backends."""
     from .artifact_config import ArtifactConfig
 
     config = ArtifactConfig(ctx.obj.get("config_path"), backend_override=ctx.obj.get("backend_override"))
 
+    # Storage remains SQLite by default and should not be changed in normal workflows.
+    config.config.setdefault("storage_backend", "sqlite")
+
     backend = click.prompt(
-        "Artifact backend", type=click.Choice(["sqlite", "filesystem", "notion"]), default="sqlite"
+        "Sync backend", type=click.Choice(["filesystem", "notion", "sqlite"]), default="filesystem"
     )
-    config.config["artifact_backend"] = backend
+    config.config["sync_backend"] = backend
 
     if backend == "filesystem":
         base_path = click.prompt(
@@ -685,7 +694,8 @@ def status(ctx, project: Optional[str]):
     from .stage_state_model import StageStateModel
 
     config = ArtifactConfig(ctx.obj.get("config_path"), backend_override=ctx.obj.get("backend_override"))
-    backend = config.get_backend()
+    backend = config.get_sync_backend()
+    storage_backend = config.get_storage_backend()
 
     manager = ProjectWorkspace()
     project_path = manager.projects_root / project if project else manager.get_current_project()
@@ -696,7 +706,8 @@ def status(ctx, project: Optional[str]):
     tracker = StageStateModel(project_path)
     state = tracker.get_status()
     click.echo("🔗 Sync Status")
-    click.echo(f"Backend: {backend}")
+    click.echo(f"Storage Backend: {storage_backend}")
+    click.echo(f"Sync Backend: {backend}")
     click.echo(f"Last Sync: {state.get('last_sync', 'Never')}")
 
 
@@ -709,7 +720,7 @@ def test(ctx):
 
     config_path = ctx.obj.get("config_path")
     config = ArtifactConfig(config_path, backend_override=ctx.obj.get("backend_override"))
-    backend = config.get_backend()
+    backend = config.get_sync_backend()
 
     click.echo("🧪 Sync Backend Test")
     click.echo(f"Backend: {backend}")
@@ -725,7 +736,7 @@ def test(ctx):
         return
 
     try:
-        store = config.get_design_store()
+        store = config.get_design_store(purpose="sync")
         validate = getattr(store, "validate_backend", None)
         if not callable(validate):
             click.echo("⚠️  Backend does not provide validation.")
@@ -756,7 +767,7 @@ def tools(ctx, show_schema: bool):
     from .artifact_config import ArtifactConfig
 
     config = ArtifactConfig(ctx.obj.get("config_path"), backend_override=ctx.obj.get("backend_override"))
-    backend = config.get_backend()
+    backend = config.get_sync_backend()
 
     click.echo("🧰 Sync Backend Tools")
     click.echo(f"Backend: {backend}")
@@ -765,7 +776,7 @@ def tools(ctx, show_schema: bool):
         click.echo("Filesystem backend has no MCP tools.")
         return
 
-    store = config.get_design_store()
+    store = config.get_design_store(purpose="sync")
     if not hasattr(store, "list_tools"):
         click.echo("Backend does not expose MCP tools.")
         return
@@ -791,7 +802,7 @@ def describe(ctx):
     from .artifact_config import ArtifactConfig
 
     config = ArtifactConfig(ctx.obj.get("config_path"), backend_override=ctx.obj.get("backend_override"))
-    backend = config.get_backend()
+    backend = config.get_sync_backend()
 
     click.echo("🧾 Backend Description")
     click.echo(f"Backend: {backend}")
@@ -800,7 +811,7 @@ def describe(ctx):
         click.echo("Filesystem backend has no remote metadata.")
         return
 
-    store = config.get_design_store()
+    store = config.get_design_store(purpose="sync")
     describe = getattr(store, "describe_backend", None)
     if not callable(describe):
         click.echo("Backend does not support describe.")
@@ -841,7 +852,7 @@ def artifact_write(ctx, project: Optional[str], session_id: Optional[str], stage
         ctx.obj.get("config_path"),
         backend_override=ctx.obj.get("backend_override"),
     )
-    if config.get_backend() != "sqlite":
+    if config.get_storage_backend() != "sqlite":
         click.echo("❌ Error: artifact write requires sqlite backend.", err=True)
         sys.exit(1)
 
@@ -1220,7 +1231,7 @@ def create_session(ctx, session_name: str, project: str):
         ctx.obj.get("config_path") if ctx.obj else None,
         backend_override=ctx.obj.get("backend_override") if ctx.obj else None,
     )
-    if config.get_backend() == "sqlite":
+    if config.get_storage_backend() == "sqlite":
         from .artifact_database import ArtifactDatabase
         from .design_store import DesignStoreFilesystem
         from .file_view_generator import FileViewGenerator
@@ -1267,7 +1278,7 @@ def create_session(ctx, session_name: str, project: str):
     click.echo(f"✅ Feature session created: {session_id}")
     click.echo(f"📁 Location: {session_path}")
     click.echo(f"📝 CURRENT_SESSION updated to: {session_id}")
-    if config.get_backend() != "sqlite":
+    if config.get_storage_backend() != "sqlite":
         try:
             from .session_graph import SessionGraph
 
@@ -1309,7 +1320,7 @@ def switch_session(ctx, session_id: str, project: str):
     config = ArtifactConfig(
         backend_override=ctx.obj.get("backend_override") if ctx.obj else None
     )
-    if config.get_backend() == "sqlite":
+    if config.get_storage_backend() == "sqlite":
         from .file_view_generator import FileViewGenerator
 
         generator = FileViewGenerator(idse_root=manager.idse_root, allow_create=False)
@@ -1317,7 +1328,7 @@ def switch_session(ctx, session_id: str, project: str):
 
     SessionGraph(project_path).set_current_session(session_id)
     click.echo(f"📝 CURRENT_SESSION updated to: {session_id}")
-    if config.get_backend() != "sqlite":
+    if config.get_storage_backend() != "sqlite":
         try:
             from .session_graph import SessionGraph
 
@@ -1729,14 +1740,13 @@ def status(ctx, project: Optional[str]):
     from .project_workspace import ProjectWorkspace
 
     try:
+        manager = ProjectWorkspace()
         config = ArtifactConfig(
             ctx.obj.get("config_path") if ctx.obj else None,
             backend_override=ctx.obj.get("backend_override") if ctx.obj else None,
         )
-        backend = config.get_backend()
-        store = None
+        backend = config.get_storage_backend()
         if backend == "sqlite":
-            manager = ProjectWorkspace()
             try:
                 ArtifactDatabase(idse_root=manager.idse_root, allow_create=False)
             except FileNotFoundError as exc:
@@ -1746,36 +1756,38 @@ def status(ctx, project: Optional[str]):
                 else:
                     click.echo(str(exc), err=True)
                 sys.exit(1)
-            store = config.get_design_store()
-
-        tracker = StageStateModel(store=store, project_name=project)
-        try:
-            state = tracker.get_status(project)
-        except FileNotFoundError:
-            # If local view files are missing but SQLite exists, regenerate and retry.
-            manager = ProjectWorkspace()
             project_path = manager.projects_root / project if project else manager.get_current_project()
-            if project_path:
-                project_name = project_path.name
-                db = ArtifactDatabase(idse_root=manager.idse_root, allow_create=False)
-                current_session = db.get_current_session(project_name)
-                if not current_session:
-                    raise FileNotFoundError(
-                        "Database missing current session. Run 'idse init' or 'idse migrate'."
-                    )
-                store = DesignStoreSQLite(idse_root=manager.idse_root, allow_create=False)
-                tracker = StageStateModel(
-                    project_path=project_path,
-                    store=store,
-                    project_name=project_name,
-                    session_id=current_session,
+            if not project_path:
+                raise FileNotFoundError("No IDSE project found. Run 'idse init' first.")
+            project_name = project_path.name
+            db = ArtifactDatabase(idse_root=manager.idse_root, allow_create=False)
+            current_session = db.get_current_session(project_name)
+            if not current_session:
+                raise FileNotFoundError(
+                    "Database missing current session. Run 'idse init' or 'idse migrate'."
                 )
-                tracker.refresh_state_file()
-                FileViewGenerator(idse_root=manager.idse_root, allow_create=False).generate_agent_registry(project_name)
+            store = DesignStoreSQLite(idse_root=manager.idse_root, allow_create=False)
+            tracker = StageStateModel(
+                project_path=project_path,
+                store=store,
+                project_name=project_name,
+                session_id=current_session,
+            )
+            try:
                 state = tracker.get_status(project_name)
-                backend = "sqlite"
-            else:
-                raise
+            except FileNotFoundError:
+                tracker.init_state(
+                    project_name,
+                    current_session,
+                    is_blueprint=current_session == "__blueprint__",
+                )
+                state = tracker.get_status(project_name)
+            # Keep file views in sync for IDE agents.
+            tracker.refresh_state_file()
+            FileViewGenerator(idse_root=manager.idse_root, allow_create=False).generate_agent_registry(project_name)
+        else:
+            tracker = StageStateModel(store=None, project_name=project)
+            state = tracker.get_status(project)
         router = IDEAgentRouting()
 
         click.echo("📊 IDSE Project Status")

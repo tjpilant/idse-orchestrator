@@ -42,7 +42,7 @@ Feedback from Feature Sessions flows upward to inform Blueprint updates.
 ## Delivery Summary
 
 - `sqlite-cms-refactor`: Implemented SQLite core storage via `ArtifactDatabase`.; Added `DesignStoreSQLite` backend and config support.; Added unit tests for SQLite CRUD and schema creation.
-- `notion-designstore-refactor`: Enhanced blueprint metadata rollup to include delivery and feedback lessons from SQLite artifacts.; Hardened markdown section extraction to support `#`, `##`, `###`, and `Executive Summary` variants.
+- `notion-designstore-refactor`: Enhanced blueprint metadata rollup to include delivery and feedback lessons from SQLite artifacts.; Hardened markdown section extraction to support `#`, `##`, `###`, and `Executive Summary` variants.; Refactored backend semantics: SQLite is now treated as storage core while sync uses a separate `sync_backend`.
 
 ## Feedback & Lessons Learned
 
@@ -50,4 +50,4 @@ Feedback from Feature Sessions flows upward to inform Blueprint updates.
 - `notion-designstore-refactor`: - 2026-02-07: Requested mission-report style blueprint rollup capturing both deliverables and lessons learned.
 
 ---
-*Last updated: 2026-02-07T22:12:58.560951*
+*Last updated: 2026-02-07T22:31:33.572259*

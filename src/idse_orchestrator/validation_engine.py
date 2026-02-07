@@ -64,7 +64,7 @@ class ValidationEngine:
         project_name = project_path.name
 
         config = ArtifactConfig(backend_override=backend_override)
-        backend = config.get_backend()
+        backend = config.get_storage_backend()
         use_db = backend == "sqlite"
         db = ArtifactDatabase(idse_root=manager.idse_root, allow_create=False) if use_db else None
 
