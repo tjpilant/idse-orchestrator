@@ -17,8 +17,10 @@ class ArtifactRecord:
     project: str
     session_id: str
     stage: str
+    idse_id: str
     content: str
     content_hash: str
+    semantic_fingerprint: str
     created_at: str
     updated_at: str
 
@@ -214,6 +216,8 @@ class ArtifactDatabase:
         session_row_id = self.ensure_session(project, session_id)
         now = _now()
         content_hash = _hash_content(content)
+        semantic_fingerprint = _semantic_fingerprint(content)
+        idse_id = _make_idse_id(project, session_id, stage)
 
         with self._connect() as conn:
             conn.execute(
@@ -222,23 +226,37 @@ class ArtifactDatabase:
                     project_id,
                     session_id,
                     stage,
+                    idse_id,
                     content,
                     content_hash,
+                    semantic_fingerprint,
                     created_at,
                     updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(session_id, stage)
                 DO UPDATE SET
+                    idse_id = excluded.idse_id,
                     content = excluded.content,
                     content_hash = excluded.content_hash,
+                    semantic_fingerprint = excluded.semantic_fingerprint,
                     updated_at = excluded.updated_at;
                 """,
-                (project_id, session_row_id, stage, content, content_hash, now, now),
+                (
+                    project_id,
+                    session_row_id,
+                    stage,
+                    idse_id,
+                    content,
+                    content_hash,
+                    semantic_fingerprint,
+                    now,
+                    now,
+                ),
             )
             row = conn.execute(
                 """
-                SELECT p.name AS project, s.session_id, a.stage, a.content, a.content_hash,
+                SELECT p.name AS project, s.session_id, a.stage, a.idse_id, a.content, a.content_hash, a.semantic_fingerprint,
                        a.created_at, a.updated_at
                 FROM artifacts a
                 JOIN sessions s ON a.session_id = s.id
@@ -252,8 +270,10 @@ class ArtifactDatabase:
             project=row["project"],
             session_id=row["session_id"],
             stage=row["stage"],
+            idse_id=row["idse_id"],
             content=row["content"],
             content_hash=row["content_hash"],
+            semantic_fingerprint=row["semantic_fingerprint"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
@@ -262,7 +282,7 @@ class ArtifactDatabase:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT p.name AS project, s.session_id, a.stage, a.content, a.content_hash,
+                SELECT p.name AS project, s.session_id, a.stage, a.idse_id, a.content, a.content_hash, a.semantic_fingerprint,
                        a.created_at, a.updated_at
                 FROM artifacts a
                 JOIN sessions s ON a.session_id = s.id
@@ -281,8 +301,10 @@ class ArtifactDatabase:
             project=row["project"],
             session_id=row["session_id"],
             stage=row["stage"],
+            idse_id=row["idse_id"],
             content=row["content"],
             content_hash=row["content_hash"],
+            semantic_fingerprint=row["semantic_fingerprint"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
@@ -393,7 +415,7 @@ class ArtifactDatabase:
     ) -> list[ArtifactRecord]:
         query = [
             """
-            SELECT p.name AS project, s.session_id, a.stage, a.content, a.content_hash,
+            SELECT p.name AS project, s.session_id, a.stage, a.idse_id, a.content, a.content_hash, a.semantic_fingerprint,
                    a.created_at, a.updated_at
             FROM artifacts a
             JOIN sessions s ON a.session_id = s.id
@@ -420,8 +442,10 @@ class ArtifactDatabase:
                 project=row["project"],
                 session_id=row["session_id"],
                 stage=row["stage"],
+                idse_id=row["idse_id"],
                 content=row["content"],
                 content_hash=row["content_hash"],
+                semantic_fingerprint=row["semantic_fingerprint"],
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
             )
@@ -437,7 +461,7 @@ class ArtifactDatabase:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT p.name AS project, s.session_id, a.stage, a.content, a.content_hash,
+                SELECT p.name AS project, s.session_id, a.stage, a.idse_id, a.content, a.content_hash, a.semantic_fingerprint,
                        a.created_at, a.updated_at
                 FROM artifacts a
                 JOIN sessions s ON a.session_id = s.id
@@ -452,13 +476,389 @@ class ArtifactDatabase:
                 project=row["project"],
                 session_id=row["session_id"],
                 stage=row["stage"],
+                idse_id=row["idse_id"],
                 content=row["content"],
                 content_hash=row["content_hash"],
+                semantic_fingerprint=row["semantic_fingerprint"],
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
             )
             for row in rows
         ]
+
+    def find_by_idse_id(self, idse_id: str) -> Optional[ArtifactRecord]:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT p.name AS project, s.session_id, a.stage, a.idse_id, a.content, a.content_hash, a.semantic_fingerprint,
+                       a.created_at, a.updated_at
+                FROM artifacts a
+                JOIN sessions s ON a.session_id = s.id
+                JOIN projects p ON a.project_id = p.id
+                WHERE a.idse_id = ?;
+                """,
+                (idse_id,),
+            ).fetchone()
+        if not row:
+            return None
+        return ArtifactRecord(
+            project=row["project"],
+            session_id=row["session_id"],
+            stage=row["stage"],
+            idse_id=row["idse_id"],
+            content=row["content"],
+            content_hash=row["content_hash"],
+            semantic_fingerprint=row["semantic_fingerprint"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    def get_artifact_id(self, project: str, session_id: str, stage: str) -> Optional[int]:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT a.id
+                FROM artifacts a
+                JOIN sessions s ON a.session_id = s.id
+                JOIN projects p ON a.project_id = p.id
+                WHERE p.name = ? AND s.session_id = ? AND a.stage = ?;
+                """,
+                (project, session_id, stage),
+            ).fetchone()
+        if not row:
+            return None
+        return int(row["id"])
+
+    def save_dependency(
+        self,
+        artifact_id: int,
+        depends_on_artifact_id: int,
+        dependency_type: str = "upstream",
+    ) -> None:
+        now = _now()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO artifact_dependencies (
+                    artifact_id, depends_on_artifact_id, dependency_type, created_at
+                )
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(artifact_id, depends_on_artifact_id)
+                DO UPDATE SET dependency_type = excluded.dependency_type;
+                """,
+                (artifact_id, depends_on_artifact_id, dependency_type, now),
+            )
+
+    def replace_dependencies(
+        self,
+        artifact_id: int,
+        depends_on_artifact_ids: Iterable[int],
+        dependency_type: str = "upstream",
+    ) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "DELETE FROM artifact_dependencies WHERE artifact_id = ?;",
+                (artifact_id,),
+            )
+            for depends_on_artifact_id in depends_on_artifact_ids:
+                conn.execute(
+                    """
+                    INSERT INTO artifact_dependencies (
+                        artifact_id, depends_on_artifact_id, dependency_type, created_at
+                    )
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(artifact_id, depends_on_artifact_id)
+                    DO UPDATE SET dependency_type = excluded.dependency_type;
+                    """,
+                    (artifact_id, depends_on_artifact_id, dependency_type, _now()),
+                )
+
+    def get_dependencies(self, artifact_id: int, direction: str = "upstream") -> list[ArtifactRecord]:
+        if direction not in {"upstream", "downstream"}:
+            raise ValueError("direction must be 'upstream' or 'downstream'")
+
+        with self._connect() as conn:
+            if direction == "upstream":
+                rows = conn.execute(
+                    """
+                    SELECT p.name AS project, s.session_id, a.stage, a.idse_id, a.content, a.content_hash, a.semantic_fingerprint,
+                           a.created_at, a.updated_at
+                    FROM artifact_dependencies d
+                    JOIN artifacts a ON d.depends_on_artifact_id = a.id
+                    JOIN sessions s ON a.session_id = s.id
+                    JOIN projects p ON a.project_id = p.id
+                    WHERE d.artifact_id = ?
+                    ORDER BY a.id;
+                    """,
+                    (artifact_id,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT p.name AS project, s.session_id, a.stage, a.idse_id, a.content, a.content_hash, a.semantic_fingerprint,
+                           a.created_at, a.updated_at
+                    FROM artifact_dependencies d
+                    JOIN artifacts a ON d.artifact_id = a.id
+                    JOIN sessions s ON a.session_id = s.id
+                    JOIN projects p ON a.project_id = p.id
+                    WHERE d.depends_on_artifact_id = ?
+                    ORDER BY a.id;
+                    """,
+                    (artifact_id,),
+                ).fetchall()
+        return [
+            ArtifactRecord(
+                project=row["project"],
+                session_id=row["session_id"],
+                stage=row["stage"],
+                idse_id=row["idse_id"],
+                content=row["content"],
+                content_hash=row["content_hash"],
+                semantic_fingerprint=row["semantic_fingerprint"],
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+            )
+            for row in rows
+        ]
+
+    def save_artifact_edge(
+        self,
+        from_artifact_id: int,
+        to_artifact_id: int,
+        edge_type: str = "derives",
+    ) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO artifact_edges (
+                    from_artifact_id, to_artifact_id, edge_type, created_at
+                ) VALUES (?, ?, ?, ?);
+                """,
+                (from_artifact_id, to_artifact_id, edge_type, _now()),
+            )
+
+    def list_artifact_edges(self, artifact_id: int, direction: str = "outbound") -> list[Dict[str, Any]]:
+        if direction not in {"outbound", "inbound"}:
+            raise ValueError("direction must be 'outbound' or 'inbound'")
+        with self._connect() as conn:
+            if direction == "outbound":
+                rows = conn.execute(
+                    """
+                    SELECT from_artifact_id, to_artifact_id, edge_type, created_at
+                    FROM artifact_edges
+                    WHERE from_artifact_id = ?;
+                    """,
+                    (artifact_id,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT from_artifact_id, to_artifact_id, edge_type, created_at
+                    FROM artifact_edges
+                    WHERE to_artifact_id = ?;
+                    """,
+                    (artifact_id,),
+                ).fetchall()
+        return [dict(row) for row in rows]
+
+    def save_feedback_signal(
+        self,
+        artifact_id: int,
+        *,
+        contradiction_flag: bool = False,
+        reinforcement_flag: bool = False,
+        notes: Optional[str] = None,
+    ) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO feedback_signals (
+                    artifact_id, contradiction_flag, reinforcement_flag, notes, created_at
+                )
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(artifact_id)
+                DO UPDATE SET
+                    contradiction_flag = excluded.contradiction_flag,
+                    reinforcement_flag = excluded.reinforcement_flag,
+                    notes = excluded.notes,
+                    created_at = excluded.created_at;
+                """,
+                (
+                    artifact_id,
+                    1 if contradiction_flag else 0,
+                    1 if reinforcement_flag else 0,
+                    notes,
+                    _now(),
+                ),
+            )
+
+    def list_feedback_signals(self, project: str, session_ids: Optional[Iterable[str]] = None) -> list[Dict[str, Any]]:
+        query = [
+            """
+            SELECT fs.artifact_id, fs.contradiction_flag, fs.reinforcement_flag, fs.notes, fs.created_at,
+                   s.session_id, a.idse_id
+            FROM feedback_signals fs
+            JOIN artifacts a ON fs.artifact_id = a.id
+            JOIN sessions s ON a.session_id = s.id
+            JOIN projects p ON a.project_id = p.id
+            WHERE p.name = ?
+            """
+        ]
+        params: list[Any] = [project]
+        if session_ids:
+            session_list = list(session_ids)
+            placeholders = ",".join(["?"] * len(session_list))
+            query.append(f"AND s.session_id IN ({placeholders})")
+            params.extend(session_list)
+        query.append("ORDER BY fs.created_at DESC;")
+        with self._connect() as conn:
+            rows = conn.execute(" ".join(query), params).fetchall()
+        return [dict(row) for row in rows]
+
+    def save_promotion_candidate(
+        self,
+        project: str,
+        *,
+        claim_text: str,
+        classification: str,
+        evidence_hash: str,
+        failed_tests: Iterable[str],
+        evidence: Dict[str, Any],
+        source_artifact_ids: Iterable[int],
+    ) -> int:
+        project_id = self.ensure_project(project)
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO promotion_candidates (
+                    project_id, claim_text, classification, evidence_hash,
+                    failed_tests_json, evidence_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?);
+                """,
+                (
+                    project_id,
+                    claim_text,
+                    classification,
+                    evidence_hash,
+                    json.dumps(list(failed_tests)),
+                    json.dumps(evidence),
+                    _now(),
+                ),
+            )
+            candidate_id = int(conn.execute("SELECT last_insert_rowid() AS id;").fetchone()["id"])
+            for artifact_id in source_artifact_ids:
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO promotion_candidate_sources (candidate_id, artifact_id)
+                    VALUES (?, ?);
+                    """,
+                    (candidate_id, artifact_id),
+                )
+        return candidate_id
+
+    def save_promotion_record(
+        self,
+        project: str,
+        *,
+        candidate_id: int,
+        status: str,
+        promoted_claim: Optional[str] = None,
+        evidence_hash: Optional[str] = None,
+    ) -> int:
+        project_id = self.ensure_project(project)
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO promotion_records (
+                    project_id, candidate_id, status, promoted_claim, evidence_hash, created_at, promoted_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?);
+                """,
+                (
+                    project_id,
+                    candidate_id,
+                    status,
+                    promoted_claim,
+                    evidence_hash,
+                    _now(),
+                    _now() if status == "ALLOW" else None,
+                ),
+            )
+            return int(conn.execute("SELECT last_insert_rowid() AS id;").fetchone()["id"])
+
+    def save_sync_metadata(
+        self,
+        artifact_id: int,
+        backend: str,
+        *,
+        last_push_hash: Optional[str] = None,
+        last_pull_hash: Optional[str] = None,
+        remote_id: Optional[str] = None,
+    ) -> None:
+        now = _now()
+        with self._connect() as conn:
+            existing = conn.execute(
+                """
+                SELECT last_push_hash, last_pull_hash, remote_id
+                FROM sync_metadata
+                WHERE artifact_id = ? AND backend = ?;
+                """,
+                (artifact_id, backend),
+            ).fetchone()
+            push_hash = last_push_hash if last_push_hash is not None else (existing["last_push_hash"] if existing else None)
+            pull_hash = last_pull_hash if last_pull_hash is not None else (existing["last_pull_hash"] if existing else None)
+            rem = remote_id if remote_id is not None else (existing["remote_id"] if existing else None)
+            conn.execute(
+                """
+                INSERT INTO sync_metadata (
+                    artifact_id, backend, last_push_hash, last_push_at, last_pull_hash, last_pull_at, remote_id
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(artifact_id, backend)
+                DO UPDATE SET
+                    last_push_hash = excluded.last_push_hash,
+                    last_push_at = excluded.last_push_at,
+                    last_pull_hash = excluded.last_pull_hash,
+                    last_pull_at = excluded.last_pull_at,
+                    remote_id = excluded.remote_id;
+                """,
+                (
+                    artifact_id,
+                    backend,
+                    push_hash,
+                    now if last_push_hash is not None else None,
+                    pull_hash,
+                    now if last_pull_hash is not None else None,
+                    rem,
+                ),
+            )
+
+    def get_sync_metadata(self, artifact_id: int, backend: str) -> Dict[str, Any]:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT artifact_id, backend, last_push_hash, last_push_at, last_pull_hash, last_pull_at, remote_id
+                FROM sync_metadata
+                WHERE artifact_id = ? AND backend = ?;
+                """,
+                (artifact_id, backend),
+            ).fetchone()
+        if not row:
+            return {}
+        return dict(row)
+
+    def find_artifact_id_by_remote_id(self, backend: str, remote_id: str) -> Optional[int]:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT artifact_id
+                FROM sync_metadata
+                WHERE backend = ? AND remote_id = ?;
+                """,
+                (backend, remote_id),
+            ).fetchone()
+        if not row:
+            return None
+        return int(row["artifact_id"])
 
     def save_agent_registry(self, project: str, registry: Dict[str, Any]) -> None:
         project_id = self.ensure_project(project)
@@ -572,6 +972,84 @@ class ArtifactDatabase:
                         (session_row_id, tag),
                     )
 
+    def save_blueprint_promotion(
+        self,
+        project: str,
+        *,
+        claim_text: str,
+        classification: str,
+        status: str,
+        evidence_hash: str,
+        failed_tests: Iterable[str],
+        evidence: Dict[str, Any],
+        source_artifact_ids: Iterable[int],
+        promoted_at: Optional[str] = None,
+    ) -> int:
+        candidate_id = self.save_promotion_candidate(
+            project,
+            claim_text=claim_text,
+            classification=classification,
+            evidence_hash=evidence_hash,
+            failed_tests=failed_tests,
+            evidence=evidence,
+            source_artifact_ids=source_artifact_ids,
+        )
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE promotion_candidates
+                SET created_at = ?
+                WHERE id = ?;
+                """,
+                (promoted_at or _now(), candidate_id),
+            )
+        return self.save_promotion_record(
+            project,
+            candidate_id=candidate_id,
+            status=status,
+            promoted_claim=claim_text if status == "ALLOW" else None,
+            evidence_hash=evidence_hash,
+        )
+
+    def list_blueprint_promotions(self, project: str, status: Optional[str] = None) -> list[Dict[str, Any]]:
+        project_id = self.ensure_project(project)
+        query = """
+            SELECT pr.id, pc.claim_text, pc.classification, pr.status, pr.evidence_hash,
+                   pc.failed_tests_json, pc.evidence_json, pr.created_at, pr.promoted_at
+            FROM promotion_records pr
+            JOIN promotion_candidates pc ON pr.candidate_id = pc.id
+            WHERE pr.project_id = ?
+        """
+        params: list[Any] = [project_id]
+        if status:
+            query += " AND pr.status = ?"
+            params.append(status)
+        query += " ORDER BY pr.created_at DESC;"
+        with self._connect() as conn:
+            rows = conn.execute(query, params).fetchall()
+            results: list[Dict[str, Any]] = []
+            for row in rows:
+                item = dict(row)
+                item["failed_tests"] = json.loads(item.pop("failed_tests_json") or "[]")
+                item["evidence"] = json.loads(item.pop("evidence_json") or "{}")
+                src_rows = conn.execute(
+                    """
+                    SELECT p.name AS project, s.session_id, a.stage, a.idse_id
+                    FROM promotion_candidate_sources pcs
+                    JOIN artifacts a ON pcs.artifact_id = a.id
+                    JOIN sessions s ON a.session_id = s.id
+                    JOIN projects p ON a.project_id = p.id
+                    WHERE pcs.candidate_id = (
+                        SELECT candidate_id FROM promotion_records WHERE id = ?
+                    )
+                    ORDER BY s.session_id, a.stage;
+                    """,
+                    (row["id"],),
+                ).fetchall()
+                item["sources"] = [dict(src) for src in src_rows]
+                results.append(item)
+        return results
+
 
 def _now() -> str:
     return datetime.now().isoformat()
@@ -583,6 +1061,15 @@ def hash_content(content: str) -> str:
 
 def _hash_content(content: str) -> str:
     return hash_content(content)
+
+
+def _semantic_fingerprint(content: str) -> str:
+    normalized = " ".join(content.lower().split())
+    return sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def _make_idse_id(project: str, session_id: str, stage: str) -> str:
+    return f"{project}::{session_id}::{stage}"
 
 
 def _ensure_columns(conn: sqlite3.Connection) -> None:
@@ -598,6 +1085,32 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
     session_columns = {row[1] for row in cursor.fetchall()}
     if "owner" not in session_columns:
         conn.execute("ALTER TABLE sessions ADD COLUMN owner TEXT;")
+    cursor = conn.execute("PRAGMA table_info(artifacts);")
+    artifact_columns = {row[1] for row in cursor.fetchall()}
+    if "idse_id" not in artifact_columns:
+        conn.execute("ALTER TABLE artifacts ADD COLUMN idse_id TEXT;")
+        conn.execute(
+            """
+            UPDATE artifacts
+            SET idse_id = (
+                SELECT p.name || '::' || s.session_id || '::' || artifacts.stage
+                FROM sessions s
+                JOIN projects p ON s.project_id = p.id
+                WHERE s.id = artifacts.session_id
+            )
+            WHERE idse_id IS NULL;
+            """
+        )
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_artifacts_idse_id ON artifacts(idse_id);")
+    if "semantic_fingerprint" not in artifact_columns:
+        conn.execute("ALTER TABLE artifacts ADD COLUMN semantic_fingerprint TEXT;")
+        conn.execute(
+            """
+            UPDATE artifacts
+            SET semantic_fingerprint = content_hash
+            WHERE semantic_fingerprint IS NULL;
+            """
+        )
 
 
 def _schema_statements() -> Iterable[str]:
@@ -637,8 +1150,10 @@ def _schema_statements() -> Iterable[str]:
             project_id INTEGER NOT NULL,
             session_id INTEGER NOT NULL,
             stage TEXT NOT NULL,
+            idse_id TEXT UNIQUE,
             content TEXT NOT NULL,
             content_hash TEXT NOT NULL,
+            semantic_fingerprint TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             UNIQUE(session_id, stage),
@@ -703,6 +1218,116 @@ def _schema_statements() -> Iterable[str]:
             tag TEXT NOT NULL,
             UNIQUE(session_id, tag),
             FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+        );
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS artifact_dependencies (
+            id INTEGER PRIMARY KEY,
+            artifact_id INTEGER NOT NULL,
+            depends_on_artifact_id INTEGER NOT NULL,
+            dependency_type TEXT NOT NULL DEFAULT 'upstream',
+            created_at TEXT NOT NULL,
+            UNIQUE(artifact_id, depends_on_artifact_id),
+            FOREIGN KEY(artifact_id) REFERENCES artifacts(id) ON DELETE CASCADE,
+            FOREIGN KEY(depends_on_artifact_id) REFERENCES artifacts(id) ON DELETE CASCADE
+        );
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS artifact_edges (
+            id INTEGER PRIMARY KEY,
+            from_artifact_id INTEGER NOT NULL,
+            to_artifact_id INTEGER NOT NULL,
+            edge_type TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            UNIQUE(from_artifact_id, to_artifact_id, edge_type),
+            FOREIGN KEY(from_artifact_id) REFERENCES artifacts(id) ON DELETE CASCADE,
+            FOREIGN KEY(to_artifact_id) REFERENCES artifacts(id) ON DELETE CASCADE
+        );
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS sync_metadata (
+            id INTEGER PRIMARY KEY,
+            artifact_id INTEGER NOT NULL,
+            backend TEXT NOT NULL,
+            last_push_hash TEXT,
+            last_push_at TEXT,
+            last_pull_hash TEXT,
+            last_pull_at TEXT,
+            remote_id TEXT,
+            UNIQUE(artifact_id, backend),
+            FOREIGN KEY(artifact_id) REFERENCES artifacts(id) ON DELETE CASCADE
+        );
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS feedback_signals (
+            artifact_id INTEGER PRIMARY KEY,
+            contradiction_flag INTEGER NOT NULL DEFAULT 0,
+            reinforcement_flag INTEGER NOT NULL DEFAULT 0,
+            notes TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(artifact_id) REFERENCES artifacts(id) ON DELETE CASCADE
+        );
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS promotion_candidates (
+            id INTEGER PRIMARY KEY,
+            project_id INTEGER NOT NULL,
+            claim_text TEXT NOT NULL,
+            classification TEXT NOT NULL,
+            evidence_hash TEXT NOT NULL,
+            failed_tests_json TEXT NOT NULL,
+            evidence_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS promotion_candidate_sources (
+            id INTEGER PRIMARY KEY,
+            candidate_id INTEGER NOT NULL,
+            artifact_id INTEGER NOT NULL,
+            UNIQUE(candidate_id, artifact_id),
+            FOREIGN KEY(candidate_id) REFERENCES promotion_candidates(id) ON DELETE CASCADE,
+            FOREIGN KEY(artifact_id) REFERENCES artifacts(id) ON DELETE CASCADE
+        );
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS promotion_records (
+            id INTEGER PRIMARY KEY,
+            project_id INTEGER NOT NULL,
+            candidate_id INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            promoted_claim TEXT,
+            evidence_hash TEXT,
+            created_at TEXT NOT NULL,
+            promoted_at TEXT,
+            FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
+            FOREIGN KEY(candidate_id) REFERENCES promotion_candidates(id) ON DELETE CASCADE
+        );
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS blueprint_promotions (
+            id INTEGER PRIMARY KEY,
+            project_id INTEGER NOT NULL,
+            claim_text TEXT NOT NULL,
+            classification TEXT NOT NULL,
+            status TEXT NOT NULL,
+            evidence_hash TEXT NOT NULL,
+            failed_tests_json TEXT NOT NULL,
+            evidence_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            promoted_at TEXT,
+            FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS blueprint_promotion_sources (
+            id INTEGER PRIMARY KEY,
+            promotion_id INTEGER NOT NULL,
+            artifact_id INTEGER NOT NULL,
+            UNIQUE(promotion_id, artifact_id),
+            FOREIGN KEY(promotion_id) REFERENCES blueprint_promotions(id) ON DELETE CASCADE,
+            FOREIGN KEY(artifact_id) REFERENCES artifacts(id) ON DELETE CASCADE
         );
         """,
     ]

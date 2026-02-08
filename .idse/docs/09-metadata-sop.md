@@ -23,6 +23,14 @@ Define the canonical locations and update rules for session-level metadata files
 - **No stage-root writes:** Legacy stage-root paths are deprecated; do not write metadata there.
 - **Auditability:** Metadata changes are part of the session history; include meaningful entries in `changelog.md` when making changes.
 
+## Blueprint Metadata Rules
+- **Authority split:** `blueprint.md` is constitutional scope; `meta.md` is runtime-derived oversight.
+- **Active Sessions section:** Include only sessions with status `draft`, `in_progress`, or `review`, plus `__blueprint__`.
+- **Session Status Matrix:** Include all sessions (including `complete` and `archived`).
+- **Lineage graph:** Render full parent/child hierarchy from session metadata.
+- **Promotion records:** Deduplicate display by `claim_text + evidence_hash` while preserving immutable DB history.
+- **Projection behavior:** Allowed promotion claims are both ledgered under `Promoted Converged Intent` and projected into canonical sections (`Purpose`, `Core Invariants`, etc.).
+
 ## Migration Guidance
 - If project-root metadata files exist (e.g., `projects/<project>/changelog.md`), copy their content into `projects/<project>/sessions/<session>/metadata/` for the active session. Keep the project-root copy read-only or remove it after validation.
 - Legacy stage-root locations must not be used for metadata.

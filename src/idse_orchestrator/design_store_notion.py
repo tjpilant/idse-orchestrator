@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from mcp import StdioServerParameters
 
+from .artifact_database import hash_content
 from .design_store_mcp import MCPDesignStoreAdapter
 
 
@@ -23,10 +24,14 @@ class NotionDesignStore(MCPDesignStoreAdapter):
 
     DEFAULT_PROPERTIES = {
         "title": {"name": "Title", "type": "title"},
-        "idse_id": {"name": "IDSE_ID", "type": "rich_text"},
-        "project": {"name": "Project", "type": "rich_text"},
         "session": {"name": "Session", "type": "rich_text"},
         "stage": {"name": "Stage", "type": "select"},
+        "status": {"name": "Status", "type": "status"},
+        "upstream_artifact": {"name": "Upstream Artifact", "type": "relation"},
+        "layer": {"name": "Layer", "type": "select"},
+        "run_scope": {"name": "Run Scope", "type": "select"},
+        "version": {"name": "Version", "type": "rich_text"},
+        "feature_capability": {"name": "Feature / Capability", "type": "rich_text"},
         "content": {"name": "body", "type": "page_body"},
     }
 
@@ -54,10 +59,12 @@ class NotionDesignStore(MCPDesignStoreAdapter):
         self.use_idse_id = True
         self._idse_schema_checked = False
         self.force_create = False
+        self.last_write_skipped = False
         self.tool_names = {**self.DEFAULT_TOOL_NAMES, **(tool_names or {})}
         self.properties = self._normalize_properties(
             {**self.DEFAULT_PROPERTIES, **(properties or {})}
         )
+        self.schema_map = NotionSchemaMap(self.properties)
 
         mcp_config = mcp_config or {}
         command = mcp_config.get("command", "npx")
@@ -80,76 +87,79 @@ class NotionDesignStore(MCPDesignStoreAdapter):
         self.force_create = enabled
 
     def load_artifact(self, project: str, session_id: str, stage: str) -> str:
-        page = self._query_artifact_page(project, session_id, stage)
-        if not page:
+        page_id = self._resolve_page_id(project, session_id, stage)
+        if not page_id:
             raise FileNotFoundError(
                 f"Artifact not found: {project}/{session_id}/{stage}"
             )
+        fetch = self._fetch_page(page_id)
         if self._content_type() == "page_body":
-            fetch = self._call_tool(
-                self.tool_names["fetch_page"], {"page_id": page["id"]}
-            )
-            return _extract_page_body(fetch)
-        return self._extract_property_text(page, "content")
+            content = _extract_page_body(fetch)
+        else:
+            content = self._extract_property_text(fetch, "content")
+
+        # Keep SQLite source-of-truth aligned after pull.
+        artifact_id = self._upsert_pulled_artifact(
+            project, session_id, stage, content, page_id
+        )
+        self._sync_dependencies_from_pull(artifact_id, fetch)
+        return content
 
     def save_artifact(self, project: str, session_id: str, stage: str, content: str) -> None:
-        self._ensure_idse_id_property()
-        page = self._query_artifact_page(project, session_id, stage)
-        title_prop = self.properties.get("title")
-        title_value = f"{stage.title()} – {project} – {session_id}"
-        properties = {
-            self.properties["project"]["name"]: self._property_value("project", project),
-            self.properties["session"]["name"]: self._property_value("session", session_id),
-            self.properties["stage"]["name"]: self._property_value(
-                "stage", _format_stage_value(stage)
-            ),
-        }
-        if self.use_idse_id:
-            properties[self.properties["idse_id"]["name"]] = self._property_value(
-                "idse_id", _make_idse_id(project, session_id, stage)
-            )
-        if title_prop:
-            properties[title_prop["name"]] = self._property_value("title", title_value)
-        if self._content_type() != "page_body":
-            properties[self.properties["content"]["name"]] = self._property_value(
-                "content", content
-            )
-        content_payload = content if self._content_type() == "page_body" else None
-        
-        # Flatten properties for both create and update (Notion MCP expects SQLite values)
-        flat_properties = _flatten_property_values(properties)
+        self.last_write_skipped = False
+        local_hash = hash_content(content)
+        if not self.force_create and self._should_skip_push(project, session_id, stage, local_hash):
+            self.last_write_skipped = True
+            return
 
-        if page:
+        page_id = None if self.force_create else self._resolve_page_id(project, session_id, stage)
+        session_context = self._load_session_context(project, session_id)
+        create_payload = self._build_create_properties(
+            project=project,
+            session_id=session_id,
+            stage=stage,
+            content=content,
+            session_context=session_context,
+        )
+        update_payload = self._build_update_properties(
+            project=project,
+            session_id=session_id,
+            stage=stage,
+            content=content,
+            session_context=session_context,
+        )
+        
+        # Flatten properties for fallback paths where IDSE_ID may be unsupported.
+        flat_update_properties = _flatten_property_values(update_payload["properties"])
+
+        if page_id:
             # Update existing page
             if self.tool_names.get("update_page"):
                 payload_props = {
                     "data": {
-                        "page_id": page["id"],
+                        "page_id": page_id,
                         "command": "update_properties",
-                        "properties": flat_properties,
+                        "properties": _flatten_property_values(update_payload["properties"]),
                     }
                 }
                 if self.debug:
                     _debug_payload(self.tool_names["update_page"], payload_props)
                 try:
                     result = self._call_tool(self.tool_names["update_page"], payload_props)
-                except Exception as exc:
-                    if "Property \"IDSE_ID\" not found" in str(exc):
-                        self.use_idse_id = False
-                        flat_props_no_id = _drop_idse_id(flat_properties, self.properties)
-                        payload_props["data"]["properties"] = flat_props_no_id
-                        result = self._call_tool(self.tool_names["update_page"], payload_props)
-                    else:
-                        raise
+                except Exception:
+                    payload_props["data"]["properties"] = _drop_idse_id(
+                        flat_update_properties, self.properties
+                    )
+                    result = self._call_tool(self.tool_names["update_page"], payload_props)
                 if self.debug:
                     _debug_result(self.tool_names["update_page"], result)
 
-                if content_payload is not None:
+                if update_payload["content_payload"] is not None:
                     payload_content = {
                         "data": {
-                            "page_id": page["id"],
+                            "page_id": page_id,
                             "command": "replace_content",
-                            "new_str": content_payload,
+                            "new_str": update_payload["content_payload"],
                         }
                     }
                     if self.debug:
@@ -157,47 +167,58 @@ class NotionDesignStore(MCPDesignStoreAdapter):
                     result = self._call_tool(self.tool_names["update_page"], payload_content)
                     if self.debug:
                         _debug_result(self.tool_names["update_page"], result)
+            self._save_push_metadata(
+                project, session_id, stage, local_hash=local_hash, remote_id=page_id
+            )
+            self._sync_dependencies_to_remote(project, session_id, stage, page_id)
             return
 
         create_tool = self.tool_names["create_page"]
         if create_tool == "create_database_item":
             payload = {
                 "database_id": self.database_id,
-                "properties": properties,
+                "properties": create_payload["properties"],
             }
             if self.debug:
                 _debug_payload(create_tool, payload)
             try:
                 new_page = self._call_tool(create_tool, payload)
-            except Exception as exc:
-                if "Property \"IDSE_ID\" not found" in str(exc):
-                    self.use_idse_id = False
-                    payload["properties"] = _drop_idse_id(properties, self.properties)
-                    new_page = self._call_tool(create_tool, payload)
-                else:
-                    raise
+            except Exception:
+                payload["properties"] = _drop_idse_id(payload["properties"], self.properties)
+                new_page = self._call_tool(create_tool, payload)
             if self.debug:
                 _debug_result(create_tool, new_page)
-            if content_payload is not None and self.tool_names.get("append_children"):
+            if create_payload["content_payload"] is not None and self.tool_names.get("append_children"):
                 page_id = _extract_page_id(new_page)
                 if page_id:
+                    self._cache_remote_id(project, session_id, stage, page_id)
                     append_payload = {
                         "block_id": page_id,
-                        "children": _render_page_body(content_payload),
+                        "children": _render_page_body(create_payload["content_payload"]),
                     }
                     if self.debug:
                         _debug_payload(self.tool_names["append_children"], append_payload)
                     result = self._call_tool(self.tool_names["append_children"], append_payload)
                     if self.debug:
                         _debug_result(self.tool_names["append_children"], result)
+            self._save_push_metadata(
+                project,
+                session_id,
+                stage,
+                local_hash=local_hash,
+                remote_id=_extract_page_id(new_page),
+            )
+            self._sync_dependencies_to_remote(
+                project, session_id, stage, _extract_page_id(new_page)
+            )
             return
 
         if create_tool == "notion-create-pages":
             payload = {
                 "pages": [
                     {
-                        "properties": flat_properties,
-                        "content": content_payload or "",
+                        "properties": _flatten_property_values(create_payload["properties"]),
+                        "content": create_payload["content_payload"] or "",
                     }
                 ]
             }
@@ -210,35 +231,48 @@ class NotionDesignStore(MCPDesignStoreAdapter):
                 _debug_payload(create_tool, payload)
             try:
                 result = self._call_tool(create_tool, payload)
-            except Exception as exc:
-                if "Property \"IDSE_ID\" not found" in str(exc):
-                    self.use_idse_id = False
-                    payload["pages"][0]["properties"] = _drop_idse_id(
-                        payload["pages"][0]["properties"], self.properties
-                    )
-                    result = self._call_tool(create_tool, payload)
-                else:
-                    raise
+            except Exception:
+                payload["pages"][0]["properties"] = _drop_idse_id(
+                    payload["pages"][0]["properties"], self.properties
+                )
+                result = self._call_tool(create_tool, payload)
             if self.debug:
                 _debug_result(create_tool, result)
+            created_page_id = _extract_page_id(result)
+            if created_page_id:
+                self._cache_remote_id(project, session_id, stage, created_page_id)
+            self._save_push_metadata(
+                project, session_id, stage, local_hash=local_hash, remote_id=created_page_id
+            )
+            self._sync_dependencies_to_remote(
+                project, session_id, stage, created_page_id
+            )
             return
 
         payload = {
             "parent": {"database_id": self.database_id},
-            "properties": properties,
+            "properties": create_payload["properties"],
         }
-        if content_payload is not None:
-            payload["content"] = content_payload
+        if create_payload["content_payload"] is not None:
+            payload["content"] = create_payload["content_payload"]
         if self.debug:
             _debug_payload(create_tool, payload)
         result = self._call_tool(create_tool, payload)
         if self.debug:
             _debug_result(create_tool, result)
+        created_page_id = _extract_page_id(result)
+        if created_page_id:
+            self._cache_remote_id(project, session_id, stage, created_page_id)
+        self._save_push_metadata(
+            project, session_id, stage, local_hash=local_hash, remote_id=created_page_id
+        )
+        self._sync_dependencies_to_remote(project, session_id, stage, created_page_id)
 
     def list_sessions(self, project: str) -> List[str]:
-        results = self._query_database(
-            filters=[self._property_filter("project", project)]
-        )
+        filters: List[Dict[str, Any]] = []
+        if "project" in self.properties:
+            filters.append(self._property_filter("project", project))
+        results = self._query_database(filters=filters)
         sessions = set()
         for page in results:
             session = self._extract_property_text(page, "session")
@@ -332,46 +366,6 @@ class NotionDesignStore(MCPDesignStoreAdapter):
             raise RuntimeError("No database_view_url or database_view_id configured.")
         return self._call_tool(self.tool_names["query_database"], payload)
 
-    def _query_artifact_page(
-        self, project: str, session_id: str, stage: str
-    ) -> Optional[Dict[str, Any]]:
-        self._ensure_idse_id_property()
-        if self.force_create:
-            return None
-        filters = [
-            self._property_filter(
-                "idse_id", _make_idse_id(project, session_id, stage)
-            )
-        ]
-        try:
-            results = self._query_database(filters)
-        except Exception as exc:
-            if "IDSE_ID" in str(exc):
-                self.use_idse_id = False
-                results = []
-            else:
-                raise
-        if results:
-            return results[0]
-        fallback_filters = [
-            self._property_filter("project", project),
-            self._property_filter("session", session_id),
-            self._property_filter("stage", stage),
-        ]
-        fallback_results = self._query_database(fallback_filters)
-        if fallback_results:
-            return fallback_results[0]
-
-        # Last-resort: search by IDSE_ID or Title across workspace, then filter by parent database.
-        idse_query = _make_idse_id(project, session_id, stage)
-        title_query = f"{_format_stage_value(stage)} – {project} – {session_id}"
-        for query in (idse_query, title_query):
-            results = self._search_pages(query)
-            page = _pick_page_in_database(results, self.database_id)
-            if page:
-                return page
-        return None
-
     def _query_database(self, filters: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         payload: Dict[str, Any] = {}
         query_tool = self.tool_names["query_database"]
@@ -409,37 +403,6 @@ class NotionDesignStore(MCPDesignStoreAdapter):
             return self._filter_items_locally(items, filters)
         return items
 
-    def _search_pages(self, query: str) -> List[Dict[str, Any]]:
-        tool = self.tool_names.get("search", "notion-search")
-        payload = {"query": query}
-        result = self._call_tool(tool, payload)
-        return _extract_results(result)
-
-    def _ensure_idse_id_property(self) -> None:
-        if not self.use_idse_id or self._idse_schema_checked:
-            return
-        tool = self.tool_names.get("update_data_source")
-        if not tool:
-            return
-        data_source_id = self.data_source_id or self.database_id
-        if not data_source_id:
-            return
-        payload = {
-            "data_source_id": data_source_id,
-            "properties": {
-                self.properties["idse_id"]["name"]: {"rich_text": {}}
-            },
-        }
-        if self.debug:
-            _debug_payload(tool, payload)
-        try:
-            result = self._call_tool(tool, payload)
-            if self.debug:
-                _debug_result(tool, result)
-        except Exception:
-            self.use_idse_id = False
-        self._idse_schema_checked = True
-
     def _filter_items_locally(
         self, items: List[Dict[str, Any]], filters: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
@@ -469,6 +432,8 @@ class NotionDesignStore(MCPDesignStoreAdapter):
                     # 'select' property
                     if filter_type == "select":
                         text_val = (prop_val_obj.get("select") or {}).get("name", "")
+                    elif filter_type == "status":
+                        text_val = (prop_val_obj.get("status") or {}).get("name", "")
                     # 'title' or 'rich_text' property
                     elif filter_type in ("title", "rich_text"):
                         # Value might be stored under the type name
@@ -495,6 +460,8 @@ class NotionDesignStore(MCPDesignStoreAdapter):
             return {"property": name, "rich_text": {"equals": value}}
         if ptype == "select":
             return {"property": name, "select": {"equals": value}}
+        if ptype == "status":
+            return {"property": name, "status": {"equals": value}}
         raise ValueError(f"Unsupported Notion property type: {ptype}")
 
     def _property_value(self, key: str, value: str) -> Dict[str, Any]:
@@ -506,6 +473,8 @@ class NotionDesignStore(MCPDesignStoreAdapter):
             return {"rich_text": [{"text": {"content": value}}]}
         if ptype == "select":
             return {"select": {"name": value}}
+        if ptype == "status":
+            return {"status": {"name": value}}
         raise ValueError(f"Unsupported Notion property type: {ptype}")
 
     def _extract_property_text(self, page: Dict[str, Any], key: str) -> str:
@@ -517,13 +486,38 @@ class NotionDesignStore(MCPDesignStoreAdapter):
             return ""
         if ptype == "select":
             return (value.get("select") or {}).get("name", "")
+        if ptype == "status":
+            return (value.get("status") or {}).get("name", "")
         if ptype in ("title", "rich_text"):
             items = value.get(ptype, [])
             return "".join([item.get("plain_text", "") for item in items])
         return ""
 
+    def _extract_property_relation_ids(self, page: Dict[str, Any], key: str) -> List[str]:
+        prop = self.properties.get(key)
+        if not prop or prop.get("type") != "relation":
+            return []
+        value = page.get("properties", {}).get(prop["name"])
+        if not value:
+            return []
+        return [
+            item.get("id")
+            for item in value.get("relation", [])
+            if isinstance(item, dict) and item.get("id")
+        ]
+
     def _content_type(self) -> str:
         return self.properties["content"]["type"]
+
+    def _fetch_page(self, page_id: str) -> Dict[str, Any]:
+        tool = self.tool_names["fetch_page"]
+        payload = {"id": page_id} if tool == "notion-fetch" else {"page_id": page_id}
+        try:
+            return self._call_tool(tool, payload)
+        except Exception:
+            # Fallback across MCP variants.
+            alt_payload = {"page_id": page_id} if "id" in payload else {"id": page_id}
+            return self._call_tool(tool, alt_payload)
 
     @staticmethod
     def _normalize_properties(properties: Dict[str, Dict[str, str]]) -> Dict[str, Dict[str, str]]:
@@ -534,6 +528,397 @@ class NotionDesignStore(MCPDesignStoreAdapter):
                 ptype = "rich_text"
             normalized[key] = {**prop, "type": ptype}
         return normalized
+
+    def _relation_property_name(self) -> Optional[str]:
+        relation = self.properties.get("upstream_artifact")
+        if not relation or relation.get("type") != "relation":
+            return None
+        return relation.get("name")
+
+    def _build_notion_properties(
+        self,
+        *,
+        project: str,
+        session_id: str,
+        stage: str,
+        content: str,
+        session_context: Optional[Dict[str, Any]] = None,
+        write_mode: str = "create",
+    ) -> Dict[str, Any]:
+        mapped = self.schema_map.build_projection(
+            project=project,
+            session_id=session_id,
+            stage=stage,
+            content=content,
+            include_idse_id=self.use_idse_id,
+            content_type=self._content_type(),
+            session_status=(session_context or {}).get("status"),
+            tags=(session_context or {}).get("tags"),
+            version=(session_context or {}).get("version"),
+            feature_capability=(session_context or {}).get("feature_capability"),
+            write_mode=write_mode,
+        )
+
+        payload: Dict[str, Any] = {"properties": {}, "content_payload": mapped["content_payload"]}
+        for key, value in mapped["fields"].items():
+            if key not in self.properties or value is None:
+                continue
+            payload["properties"][self.properties[key]["name"]] = self._property_value(key, value)
+        return payload
+
+    def _build_create_properties(
+        self,
+        *,
+        project: str,
+        session_id: str,
+        stage: str,
+        content: str,
+        session_context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        return self._build_notion_properties(
+            project=project,
+            session_id=session_id,
+            stage=stage,
+            content=content,
+            session_context=session_context,
+            write_mode="create",
+        )
+
+    def _build_update_properties(
+        self,
+        *,
+        project: str,
+        session_id: str,
+        stage: str,
+        content: str,
+        session_context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        return self._build_notion_properties(
+            project=project,
+            session_id=session_id,
+            stage=stage,
+            content=content,
+            session_context=session_context,
+            write_mode="update",
+        )
+
+    def _load_session_context(self, project: str, session_id: str) -> Dict[str, Any]:
+        """Best-effort local context for computed Notion fields."""
+        try:
+            from .artifact_database import ArtifactDatabase
+
+            db = ArtifactDatabase(allow_create=False)
+            session_meta = None
+            for row in db.list_session_metadata(project):
+                if row["session_id"] == session_id:
+                    session_meta = row
+                    break
+            tags: List[str] = []
+            if session_meta:
+                with db._connect() as conn:
+                    rows = conn.execute(
+                        """
+                        SELECT t.tag
+                        FROM session_tags t
+                        JOIN sessions s ON t.session_id = s.id
+                        JOIN projects p ON s.project_id = p.id
+                        WHERE p.name = ? AND s.session_id = ?
+                        ORDER BY t.tag;
+                        """,
+                        (project, session_id),
+                    ).fetchall()
+                    tags = [row["tag"] for row in rows]
+            return {
+                "status": session_meta["status"] if session_meta else None,
+                "tags": tags,
+                "version": _derive_version(session_id),
+                "feature_capability": session_meta["description"] if session_meta else None,
+            }
+        except Exception:
+            return {}
+
+    def _resolve_page_id(self, project: str, session_id: str, stage: str) -> Optional[str]:
+        artifact_id = self._lookup_artifact_id(project, session_id, stage)
+        if artifact_id is not None:
+            try:
+                from .artifact_database import ArtifactDatabase
+
+                db = ArtifactDatabase(allow_create=False)
+                meta = db.get_sync_metadata(artifact_id, "notion")
+                remote_id = meta.get("remote_id") if meta else None
+                if remote_id:
+                    return remote_id
+            except Exception:
+                pass
+
+        filters = [
+            self._property_filter("session", session_id),
+            self._property_filter("stage", _format_stage_value(stage)),
+        ]
+        results = self._query_database(filters)
+        if not results:
+            return None
+        page_id = _extract_page_id(results[0])
+        if page_id:
+            self._cache_remote_id(project, session_id, stage, page_id)
+        return page_id
+
+    def _lookup_artifact_id(self, project: str, session_id: str, stage: str) -> Optional[int]:
+        try:
+            from .artifact_database import ArtifactDatabase
+
+            db = ArtifactDatabase(allow_create=False)
+            return db.get_artifact_id(project, session_id, stage)
+        except Exception:
+            return None
+
+    def _cache_remote_id(self, project: str, session_id: str, stage: str, remote_id: str) -> None:
+        artifact_id = self._lookup_artifact_id(project, session_id, stage)
+        if artifact_id is None:
+            return
+        try:
+            from .artifact_database import ArtifactDatabase
+
+            db = ArtifactDatabase(allow_create=False)
+            db.save_sync_metadata(artifact_id, "notion", remote_id=remote_id)
+        except Exception:
+            return
+
+    def _should_skip_push(
+        self, project: str, session_id: str, stage: str, local_hash: str
+    ) -> bool:
+        artifact_id = self._lookup_artifact_id(project, session_id, stage)
+        if artifact_id is None:
+            return False
+        try:
+            from .artifact_database import ArtifactDatabase
+
+            db = ArtifactDatabase(allow_create=False)
+            meta = db.get_sync_metadata(artifact_id, "notion")
+            if not meta:
+                return False
+            if not meta.get("remote_id"):
+                return False
+            return meta.get("last_push_hash") == local_hash
+        except Exception:
+            return False
+
+    def _save_push_metadata(
+        self,
+        project: str,
+        session_id: str,
+        stage: str,
+        *,
+        local_hash: str,
+        remote_id: Optional[str],
+    ) -> None:
+        artifact_id = self._lookup_artifact_id(project, session_id, stage)
+        if artifact_id is None:
+            return
+        try:
+            from .artifact_database import ArtifactDatabase
+
+            db = ArtifactDatabase(allow_create=False)
+            db.save_sync_metadata(
+                artifact_id,
+                "notion",
+                last_push_hash=local_hash,
+                remote_id=remote_id,
+            )
+        except Exception:
+            return
+
+    def _upsert_pulled_artifact(
+        self,
+        project: str,
+        session_id: str,
+        stage: str,
+        content: str,
+        remote_id: Optional[str],
+    ) -> Optional[int]:
+        try:
+            from .artifact_database import ArtifactDatabase
+
+            db = ArtifactDatabase(allow_create=False)
+            db.save_artifact(project, session_id, stage, content)
+            artifact_id = db.get_artifact_id(project, session_id, stage)
+            if artifact_id is None:
+                return None
+            db.save_sync_metadata(
+                artifact_id,
+                "notion",
+                last_pull_hash=hash_content(content),
+                remote_id=remote_id,
+            )
+            return artifact_id
+        except Exception:
+            return None
+
+    def _sync_dependencies_from_pull(
+        self,
+        artifact_id: Optional[int],
+        page: Dict[str, Any],
+    ) -> None:
+        if artifact_id is None:
+            return
+        relation_ids = self._extract_property_relation_ids(page, "upstream_artifact")
+        try:
+            from .artifact_database import ArtifactDatabase
+
+            db = ArtifactDatabase(allow_create=False)
+            mapped_artifact_ids = []
+            for remote_id in relation_ids:
+                depends_on_id = db.find_artifact_id_by_remote_id("notion", remote_id)
+                if depends_on_id is not None:
+                    mapped_artifact_ids.append(depends_on_id)
+            db.replace_dependencies(
+                artifact_id,
+                mapped_artifact_ids,
+                dependency_type="upstream",
+            )
+        except Exception:
+            return
+
+    def _sync_dependencies_to_remote(
+        self,
+        project: str,
+        session_id: str,
+        stage: str,
+        page_id: Optional[str],
+    ) -> None:
+        relation_name = self._relation_property_name()
+        if not page_id or not relation_name:
+            return
+        artifact_id = self._lookup_artifact_id(project, session_id, stage)
+        if artifact_id is None:
+            return
+        try:
+            from .artifact_database import ArtifactDatabase
+
+            db = ArtifactDatabase(allow_create=False)
+            relation_remote_ids: List[str] = []
+            for dep in db.get_dependencies(artifact_id, direction="upstream"):
+                dep_artifact_id = db.get_artifact_id(dep.project, dep.session_id, dep.stage)
+                if dep_artifact_id is None:
+                    continue
+                dep_meta = db.get_sync_metadata(dep_artifact_id, "notion")
+                remote_id = dep_meta.get("remote_id") if dep_meta else None
+                if remote_id:
+                    relation_remote_ids.append(remote_id)
+
+            if not self.tool_names.get("update_page"):
+                return
+            payload = {
+                "data": {
+                    "page_id": page_id,
+                    "command": "update_properties",
+                    "properties": {relation_name: relation_remote_ids},
+                }
+            }
+            self._call_tool(self.tool_names["update_page"], payload)
+        except Exception:
+            return
+
+
+class NotionSchemaMap:
+    """Maps canonical IDSE fields into a Notion property projection."""
+
+    LAYER_TAGS = {"application", "domain", "data", "infrastructure", "platform", "ui"}
+    RUN_SCOPE_TAGS = {"full", "feature", "module", "component", "task", "hotfix"}
+    FIELD_MODES = {
+        "title": "create_only",
+        "idse_id": "optional",
+        "project": "optional",
+        "session": "always_sync",
+        "stage": "always_sync",
+        "status": "optional",
+        "layer": "optional",
+        "run_scope": "optional",
+        "version": "optional",
+        "feature_capability": "optional",
+        "content": "always_sync",
+    }
+    STATUS_VALUE_MAP = {
+        "draft": "Draft",
+        "in_progress": "In Review",
+        "review": "In Review",
+        "complete": "Locked",
+        "archived": "Superseded",
+    }
+
+    def __init__(self, properties: Dict[str, Dict[str, str]]):
+        self.properties = properties
+
+    def build_projection(
+        self,
+        *,
+        project: str,
+        session_id: str,
+        stage: str,
+        content: str,
+        include_idse_id: bool,
+        content_type: str,
+        write_mode: str = "create",
+        session_status: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        version: Optional[str] = None,
+        feature_capability: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        tag_list = tags or []
+        fields: Dict[str, Optional[str]] = {
+            "project": project,
+            "session": session_id,
+            "stage": _format_stage_value(stage),
+            "title": f"{_format_stage_value(stage)} – {session_id}",
+            "status": self._map_status(session_status),
+            "layer": self._derive_layer(tag_list),
+            "run_scope": self._derive_run_scope(tag_list),
+            "version": version,
+            "feature_capability": feature_capability,
+        }
+        if include_idse_id:
+            fields["idse_id"] = _make_idse_id(project, session_id, stage)
+        if content_type != "page_body":
+            fields["content"] = content
+            content_payload = None
+        else:
+            content_payload = content
+        selected = {
+            key: value
+            for key, value in fields.items()
+            if self._include_field(key, write_mode)
+        }
+        return {"fields": selected, "content_payload": content_payload}
+
+    def _derive_layer(self, tags: List[str]) -> Optional[str]:
+        for tag in tags:
+            lower = tag.lower()
+            if lower in self.LAYER_TAGS:
+                return tag.title()
+        return None
+
+    def _derive_run_scope(self, tags: List[str]) -> Optional[str]:
+        for tag in tags:
+            lower = tag.lower()
+            if lower in self.RUN_SCOPE_TAGS:
+                return tag.title()
+        return None
+
+    def _include_field(self, key: str, write_mode: str) -> bool:
+        mode = self.FIELD_MODES.get(key, "optional")
+        if mode == "always_sync":
+            return True
+        if mode == "create_only":
+            return write_mode == "create"
+        if mode == "optional":
+            return True
+        return True
+
+    def _map_status(self, session_status: Optional[str]) -> Optional[str]:
+        if not session_status:
+            return None
+        normalized = session_status.strip().lower()
+        return self.STATUS_VALUE_MAP.get(normalized, session_status)
 
 
 def _extract_results(result: Any) -> List[Dict[str, Any]]:
@@ -629,15 +1014,41 @@ def _flatten_property_values(properties: Dict[str, Any]) -> Dict[str, Any]:
             if inner_key == "select" and isinstance(inner_val, dict):
                 flattened[name] = inner_val.get("name", "")
                 continue
+            if inner_key == "status" and isinstance(inner_val, dict):
+                flattened[name] = inner_val.get("name", "")
+                continue
         flattened[name] = value
     return flattened
 
 
 def _extract_page_id(result: Any) -> Optional[str]:
     if isinstance(result, dict):
-        return result.get("id") or result.get("page_id")
+        direct = result.get("id") or result.get("page_id")
+        if isinstance(direct, str):
+            return direct
+        url_value = result.get("url")
+        if isinstance(url_value, str):
+            url_id = _extract_id_from_notion_url(url_value)
+            if url_id:
+                return url_id
+        for key in ("results", "pages", "items", "data"):
+            candidate = _extract_page_id(result.get(key))
+            if candidate:
+                return candidate
     if isinstance(result, str):
         return result
+    if isinstance(result, list):
+        for item in result:
+            candidate = _extract_page_id(item)
+            if candidate:
+                return candidate
+    return None
+
+
+def _extract_id_from_notion_url(url: str) -> Optional[str]:
+    tail = url.rstrip("/").split("/")[-1]
+    if len(tail) == 32 and all(c in "0123456789abcdefABCDEF" for c in tail):
+        return tail
     return None
 
 
@@ -658,21 +1069,22 @@ def _make_idse_id(project: str, session_id: str, stage: str) -> str:
     return f"{project}::{session_id}::{stage}"
 
 
+def _derive_version(session_id: str) -> Optional[str]:
+    # Lightweight heuristic: use trailing vN / vN.N token when present.
+    parts = session_id.replace("_", "-").split("-")
+    for token in reversed(parts):
+        if token.startswith("v") and len(token) > 1:
+            return token
+    return None
+
+
 def _drop_idse_id(properties: Dict[str, Any], prop_map: Dict[str, Dict[str, str]]) -> Dict[str, Any]:
+    if "idse_id" not in prop_map:
+        return properties
     name = prop_map.get("idse_id", {}).get("name", "IDSE_ID")
     if name in properties:
         return {k: v for k, v in properties.items() if k != name}
     return properties
-
-
-def _pick_page_in_database(results: List[Dict[str, Any]], database_id: str) -> Optional[Dict[str, Any]]:
-    if not results:
-        return None
-    for item in results:
-        parent = item.get("parent") or {}
-        if parent.get("database_id") == database_id or parent.get("data_source_id") == database_id:
-            return item
-    return results[0]
 
 
 def _debug_payload(tool_name: str, payload: Dict[str, Any]) -> None:

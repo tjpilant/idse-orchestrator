@@ -273,3 +273,301 @@ def test_cli_session_set_status_complete_updates_metadata_and_state(tmp_path):
 
         state = db.load_session_state(project, session_id)
         assert all(value == "completed" for value in state["stages"].values())
+
+
+def test_cli_session_set_stage_updates_single_stage_status(tmp_path):
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        idse_root = Path(".") / ".idse"
+        project = "demo"
+        session_id = "session-1"
+        session_dir = idse_root / "projects" / project / "sessions" / session_id
+        session_dir.mkdir(parents=True, exist_ok=True)
+
+        metadata_dir = session_dir / "metadata"
+        metadata_dir.mkdir(parents=True, exist_ok=True)
+        metadata = {
+            "session_id": session_id,
+            "name": session_id,
+            "session_type": "feature",
+            "description": None,
+            "is_blueprint": False,
+            "parent_session": "__blueprint__",
+            "related_sessions": [],
+            "owner": "system",
+            "collaborators": [],
+            "tags": [],
+            "status": "draft",
+            "created_at": "2026-02-07T00:00:00",
+            "updated_at": "2026-02-07T00:00:00",
+        }
+        (metadata_dir / "session.json").write_text(json.dumps(metadata, indent=2))
+
+        from idse_orchestrator.artifact_database import ArtifactDatabase
+
+        db = ArtifactDatabase(idse_root=idse_root)
+        db.ensure_session(project, session_id, owner="system", status="draft")
+
+        result = runner.invoke(
+            main,
+            [
+                "session",
+                "set-stage",
+                session_id,
+                "--project",
+                project,
+                "--stage",
+                "implementation",
+                "--status",
+                "in_progress",
+            ],
+        )
+        assert result.exit_code == 0
+
+        state = db.load_session_state(project, session_id)
+        assert state["stages"]["implementation"] == "in_progress"
+        assert state["stages"]["intent"] == "pending"
+
+
+def test_cli_sync_push_reports_partial_failures_without_abort(tmp_path, monkeypatch):
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        idse_root = Path(".") / ".idse"
+        project = "demo"
+        session_id = "s1"
+        (idse_root / "projects" / project / "sessions" / session_id).mkdir(parents=True, exist_ok=True)
+
+        from idse_orchestrator.artifact_database import ArtifactDatabase
+
+        db = ArtifactDatabase(idse_root=idse_root)
+        db.save_artifact(project, session_id, "intent", "intent body")
+        db.save_artifact(project, session_id, "context", "context body")
+        db.save_session_state(
+            project,
+            session_id,
+            {
+                "project_name": project,
+                "session_id": session_id,
+                "is_blueprint": False,
+                "stages": {
+                    "intent": "pending",
+                    "context": "pending",
+                    "spec": "pending",
+                    "plan": "pending",
+                    "tasks": "pending",
+                    "implementation": "pending",
+                    "feedback": "pending",
+                },
+                "last_sync": None,
+                "validation_status": "unknown",
+                "created_at": "2026-02-08T00:00:00",
+            },
+        )
+
+        class FakeRemoteStore:
+            def __init__(self):
+                self.last_write_skipped = False
+
+            def save_artifact(self, _project, _session, stage, _content):
+                if stage == "context":
+                    raise RuntimeError("context push failed")
+                self.last_write_skipped = False
+
+        monkeypatch.setattr(
+            "idse_orchestrator.artifact_config.ArtifactConfig.get_design_store",
+            lambda *_args, **_kwargs: FakeRemoteStore(),
+        )
+
+        config_path = Path(".") / ".idseconfig.json"
+        config_path.write_text(
+            '{"storage_backend":"sqlite","sync_backend":"notion","sqlite":{"db_path":".idse/idse.db"}}'
+        )
+
+        result = runner.invoke(
+            main,
+            [
+                "sync",
+                "--config",
+                str(config_path),
+                "push",
+                "--project",
+                project,
+                "--session",
+                session_id,
+                "--yes",
+            ],
+        )
+        assert result.exit_code == 0
+        assert "Failed: context" in result.output
+        assert "- context: context push failed" in result.output
+
+
+def test_cli_sync_pull_reports_partial_failures_without_abort(tmp_path, monkeypatch):
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        idse_root = Path(".") / ".idse"
+        project = "demo"
+        session_id = "s1"
+        (idse_root / "projects" / project / "sessions" / session_id).mkdir(parents=True, exist_ok=True)
+
+        from idse_orchestrator.artifact_database import ArtifactDatabase
+
+        db = ArtifactDatabase(idse_root=idse_root)
+        db.save_session_state(
+            project,
+            session_id,
+            {
+                "project_name": project,
+                "session_id": session_id,
+                "is_blueprint": False,
+                "stages": {
+                    "intent": "pending",
+                    "context": "pending",
+                    "spec": "pending",
+                    "plan": "pending",
+                    "tasks": "pending",
+                    "implementation": "pending",
+                    "feedback": "pending",
+                },
+                "last_sync": None,
+                "validation_status": "unknown",
+                "created_at": "2026-02-08T00:00:00",
+            },
+        )
+
+        class FakeRemoteStore:
+            def load_artifact(self, _project, _session, stage):
+                if stage == "intent":
+                    return "intent from remote"
+                if stage == "context":
+                    raise RuntimeError("context pull failed")
+                raise FileNotFoundError(stage)
+
+        monkeypatch.setattr(
+            "idse_orchestrator.artifact_config.ArtifactConfig.get_design_store",
+            lambda *_args, **_kwargs: FakeRemoteStore(),
+        )
+
+        config_path = Path(".") / ".idseconfig.json"
+        config_path.write_text(
+            '{"storage_backend":"sqlite","sync_backend":"notion","sqlite":{"db_path":".idse/idse.db"}}'
+        )
+
+        result = runner.invoke(
+            main,
+            [
+                "sync",
+                "--config",
+                str(config_path),
+                "pull",
+                "--project",
+                project,
+                "--session",
+                session_id,
+                "--yes",
+            ],
+        )
+        assert result.exit_code == 0
+        assert "✓ intent" in result.output
+        assert "Failed: context" in result.output
+        assert "- context: context pull failed" in result.output
+
+        pulled = db.load_artifact(project, session_id, "intent")
+        assert pulled.content == "intent from remote"
+
+
+def test_cli_blueprint_promote_allows_and_regenerates(tmp_path):
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        idse_root = Path(".") / ".idse"
+        project = "demo"
+        (idse_root / "projects" / project / "sessions" / "__blueprint__" / "metadata").mkdir(
+            parents=True, exist_ok=True
+        )
+        (idse_root / "projects" / project / "CURRENT_SESSION").write_text("__blueprint__")
+
+        from idse_orchestrator.artifact_database import ArtifactDatabase
+
+        db = ArtifactDatabase(idse_root=idse_root)
+        db.save_artifact(project, "s1", "intent", "SQLite is default storage backend for new projects.")
+        db.save_artifact(project, "s2", "spec", "New projects must use SQLite as mandatory backend.")
+        db.save_artifact(project, "s1", "feedback", "Implementation feedback confirmed this rule.")
+        db.save_artifact(project, "s2", "feedback", "Lessons learned reinforced the invariant.")
+
+        result = runner.invoke(
+            main,
+            [
+                "blueprint",
+                "promote",
+                "--project",
+                project,
+                "--claim",
+                "SQLite is default storage backend.",
+                "--classification",
+                "invariant",
+                "--source",
+                "s1:intent",
+                "--source",
+                "s2:spec",
+                "--min-days",
+                "0",
+            ],
+        )
+        assert result.exit_code == 0
+        assert "Blueprint Promotion Decision: ALLOW" in result.output
+        assert "✅ Blueprint artifacts regenerated" in result.output
+
+        promotions = db.list_blueprint_promotions(project, status="ALLOW")
+        assert len(promotions) == 1
+
+        scope = (
+            idse_root
+            / "projects"
+            / project
+            / "sessions"
+            / "__blueprint__"
+            / "metadata"
+            / "blueprint.md"
+        ).read_text()
+        assert "SQLite is default storage backend." in scope
+
+
+def test_cli_blueprint_extract_candidates(tmp_path):
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        idse_root = Path(".") / ".idse"
+        project = "demo"
+        (idse_root / "projects" / project).mkdir(parents=True, exist_ok=True)
+
+        from idse_orchestrator.artifact_database import ArtifactDatabase
+
+        db = ArtifactDatabase(idse_root=idse_root)
+        db.save_artifact(project, "s1", "spec", "SQLite is the default storage backend for project artifacts.")
+        db.save_artifact(project, "s2", "intent", "SQLite is default storage backend for all project artifacts.")
+        db.save_artifact(project, "s1", "feedback", "Constraint reinforced during implementation.")
+        db.save_artifact(project, "s2", "feedback", "Constraint reinforced by validation.")
+
+        result = runner.invoke(
+            main,
+            [
+                "blueprint",
+                "extract-candidates",
+                "--project",
+                project,
+                "--min-sources",
+                "2",
+                "--min-sessions",
+                "2",
+                "--min-stages",
+                "2",
+                "--limit",
+                "5",
+                "--evaluate",
+                "--min-days",
+                "0",
+            ],
+        )
+        assert result.exit_code == 0
+        assert "Extracted" in result.output
+        assert "authoritative storage backend" in result.output
+        assert "Gate: ALLOW" in result.output

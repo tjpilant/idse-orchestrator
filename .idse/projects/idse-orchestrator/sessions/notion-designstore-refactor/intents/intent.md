@@ -19,7 +19,9 @@ The current `NotionDesignStore` was built before the SQLite CMS refactor. It ope
 
 ## Success Criteria (measurable)
 - Baseline: Notion sync ignores SQLite hashes, duplicates can occur on re-push → Target: Push/pull uses `content_hash` comparison, unchanged artifacts are skipped.
-- Baseline: `idse_id` computed at runtime each push → Target: `idse_id` stored in `artifacts` table, used as sync anchor.
+- Baseline: No local cache of Notion page IDs, every push requires search/query → Target: `sync_metadata.remote_id` caches Notion page ID locally, eliminating redundant API lookups.
+- Baseline: Push overwrites Notion Title with computed string → Target: Title set on create only, never overwritten on update. Human-authored titles preserved.
+- Baseline: Push forces `IDSE_ID` and `Project` properties into Notion schema → Target: Neither required. Page matching uses cached `remote_id`, not Notion property queries.
 - Baseline: No import from Notion → Target: `idse sync pull --backend notion` populates SQLite from Notion pages.
 
 ## Constraints / Assumptions / Risks
@@ -36,9 +38,12 @@ The current `NotionDesignStore` was built before the SQLite CMS refactor. It ope
 - In scope:
   - Add `idse_id` column to `artifacts` table with migration.
   - Add `artifact_dependencies` table for upstream/downstream lineage.
-  - Refactor `NotionDesignStore` to use stored `idse_id` as sync anchor.
+  - Add `sync_metadata` table with `remote_id` for Notion page ID caching.
+  - Refactor `NotionDesignStore` to use `sync_metadata.remote_id` as primary page lookup (no more IDSE_ID/Project Notion property queries).
+  - Remove `_ensure_idse_id_property()` — no longer force-creating Notion schema properties.
+  - Implement property write modes: `create_only` (Title), `always_sync` (Stage, Status, content), `optional` (Layer, Run Scope, Version).
   - Implement hash-based change detection in Notion push/pull.
-  - Formalize schema mapping: SQLite spine fields → Notion property projections.
+  - Formalize schema mapping: SQLite spine fields → Notion property projections (minimal required set: Title, Stage, Session, Status, page body).
   - Implement Notion → SQLite import for `idse sync pull`.
   - Documentation for Notion sync workflow.
 - Out of scope / non-goals:

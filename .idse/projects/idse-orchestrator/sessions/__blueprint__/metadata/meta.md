@@ -1,4 +1,4 @@
-# idse-orchestrator - Blueprint Session Meta
+# idse-orchestrator - Blueprint Meta
 
 ## Session Registry
 
@@ -7,7 +7,6 @@ This document tracks all sessions spawned from this Blueprint.
 ### Active Sessions
 - `__blueprint__` (THIS SESSION) - Project governance and roadmap
 - `designstore-file-artifacts` - Feature session
-- `sqlite-cms-refactor` - SQLite CMS refactor session
 - `notion-designstore-refactor` - Feature session
 
 ## Session Status Matrix
@@ -17,23 +16,23 @@ This document tracks all sessions spawned from this Blueprint.
 | __blueprint__ | blueprint | draft | system | 2026-02-04 | 0% |
 | designstore-file-artifacts | feature | draft | system | 2026-02-04 | 0% |
 | sqlite-cms-refactor | feature | complete | system | 2026-02-04 | 100% |
-| notion-designstore-refactor | feature | draft | system | 2026-02-07 | 0% |
+| notion-designstore-refactor | feature | in_progress | tjpilant | 2026-02-07 | 86% |
 
 ## Lineage Graph
 
 ```
 __blueprint__ (root)
+├── designstore-file-artifacts
+├── notion-designstore-refactor
+└── sqlite-cms-refactor
 ```
 
 ## Governance
 
-This Blueprint defines:
-- Project-level intent and vision
-- Technical architecture constraints
-- Feature roadmap and dependencies
-- Session creation rules
-
-All Feature Sessions inherit from this Blueprint's context and specs.
+Authoritative scope is defined in `blueprint.md`.
+- `meta.md` is derived from runtime session state in SQLite.
+- Use `blueprint.md` to define or change project intent, constraints, and invariants.
+- Use `meta.md` to monitor delivery, feedback, and alignment across sessions.
 
 ## Feedback Loop
 
@@ -41,13 +40,46 @@ Feedback from Feature Sessions flows upward to inform Blueprint updates.
 
 ## Delivery Summary
 
-- `sqlite-cms-refactor`: Implemented SQLite core storage via `ArtifactDatabase`.; Added `DesignStoreSQLite` backend and config support.; Added unit tests for SQLite CRUD and schema creation.
-- `notion-designstore-refactor`: Enhanced blueprint metadata rollup to include delivery and feedback lessons from SQLite artifacts.; Hardened markdown section extraction to support `#`, `##`, `###`, and `Executive Summary` variants.; Refactored backend semantics: SQLite is now treated as storage core while sync uses a separate `sync_backend`.
+- `sqlite-cms-refactor`: Implemented SQLite core storage via `ArtifactDatabase`.; Added `DesignStoreSQLite` backend and config support.; Added unit tests for SQLite CRUD and schema creation.; Added `FileViewGenerator` and `idse export` command.; Added file-to-DB migration tooling and `idse migrate` command.
+- `notion-designstore-refactor`: Enhanced blueprint metadata rollup to include delivery and feedback lessons from SQLite artifacts.; Hardened markdown section extraction to support `#`, `##`, `###`, and `Executive Summary` variants.; Refactored backend semantics: SQLite is now treated as storage core while sync uses a separate `sync_backend`.; Added session metadata management commands to avoid direct JSON edits:; `idse session set-owner`
 
 ## Feedback & Lessons Learned
 
-- `sqlite-cms-refactor`: - 2026-02-04: Implementer noted SQLite schema + backend landed cleanly; no external feedback yet.
-- `notion-designstore-refactor`: - 2026-02-07: Requested mission-report style blueprint rollup capturing both deliverables and lessons learned.
+- `sqlite-cms-refactor`: Stored project state as JSON in SQLite for parity with legacy `session_state.json`.; Clarify defaults: SQLite is default for new projects; filesystem is legacy/explicit opt-in.; Session state file should become a generated view of CURRENT_SESSION state from SQLite.
+- `notion-designstore-refactor`: Added `Feedback & Lessons Learned` rollup to blueprint meta.; Enforced section variants (`Summary`, `Executive Summary`, `Lessons Learned`) and bullet truncation (200 chars).; Storage/sync split adopted:; Storage default remains SQLite (`storage_backend`).; Sync target uses independent `sync_backend`.
+
+## Blueprint Promotion Record
+
+- Date: 2026-02-08T04:54:05.757638
+  Promoted Claim: IDSE Orchestrator is the design-time Documentation OS for project intent and delivery.
+  Classification: non_negotiable_constraint
+  Source Sessions: __blueprint__, designstore-file-artifacts
+  Source Stages: context, intent
+  Feedback Artifacts: idse-orchestrator::__blueprint__::feedback, idse-orchestrator::designstore-file-artifacts::feedback
+  Evidence Hash: 91ecf19533a1788986addd301c46195dbcda779e5212ca12bafc8c7bb80807ca
+- Date: 2026-02-08T04:50:57.556902
+  Promoted Claim: SQLite is the authoritative storage backend for project artifacts.
+  Classification: invariant
+  Source Sessions: notion-designstore-refactor, sqlite-cms-refactor
+  Source Stages: feedback, spec
+  Feedback Artifacts: idse-orchestrator::notion-designstore-refactor::feedback, idse-orchestrator::sqlite-cms-refactor::feedback
+  Evidence Hash: 75f04365ac4539d9e02bd66fc1fdcfd59214bce6639377ce21b980256ee46ebc
+- Date: 2026-02-08T04:29:31.463611
+  Promoted Claim: SQLite is the default storage backend for project artifacts.
+  Classification: invariant
+  Source Sessions: notion-designstore-refactor, sqlite-cms-refactor
+  Source Stages: feedback, spec
+  Feedback Artifacts: idse-orchestrator::notion-designstore-refactor::feedback, idse-orchestrator::sqlite-cms-refactor::feedback
+  Evidence Hash: 4b6a41e196af071dfb1382af33bfa0e31de088e458d9200c6342840b77787d96
+
+## Meta Narrative
+
+<!-- BEGIN CUSTOM NARRATIVE -->
+Use this section for high-detail blueprint context that should survive metadata regeneration.
+- Architecture rationale
+- Cross-session decisions
+- Risks and mitigation notes
+<!-- END CUSTOM NARRATIVE -->
 
 ---
-*Last updated: 2026-02-07T22:51:43.960540*
+*Last updated: 2026-02-08T05:07:58.870002*

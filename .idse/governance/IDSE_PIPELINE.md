@@ -43,3 +43,9 @@ Atomic units with clear testability and safe parallelization.
 
 ## Feedback
 Production learnings that update specs.
+
+## Blueprint Convergence Rules
+- Pipeline artifacts are exploratory working intent.
+- Feedback validates or contradicts working intent.
+- Blueprint claims are promoted only through gate-approved convergence checks.
+- `meta.md` reports runtime/session evidence; `blueprint.md` records converged constitutional intent.

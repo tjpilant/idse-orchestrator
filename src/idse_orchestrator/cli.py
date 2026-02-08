@@ -511,24 +511,40 @@ def push(ctx, project: Optional[str], session_override: Optional[str], yes: bool
         click.echo(f"   Sync Target: {sync_backend}")
         pushed = []
         skipped = []
+        failed = []
         for stage, content in artifacts.items():
-            local_hash = hash_content(content)
             try:
-                remote_content = remote_store.load_artifact(project_name, session_id, stage)
-                remote_hash = hash_content(remote_content)
-                if remote_hash == local_hash:
-                    skipped.append(stage)
+                if use_db and sync_backend == "notion":
+                    remote_store.save_artifact(project_name, session_id, stage, content)
+                    if getattr(remote_store, "last_write_skipped", False):
+                        skipped.append(stage)
+                    else:
+                        pushed.append(stage)
                     continue
-            except FileNotFoundError:
-                pass
-            remote_store.save_artifact(project_name, session_id, stage, content)
-            pushed.append(stage)
+
+                local_hash = hash_content(content)
+                try:
+                    remote_content = remote_store.load_artifact(project_name, session_id, stage)
+                    remote_hash = hash_content(remote_content)
+                    if remote_hash == local_hash:
+                        skipped.append(stage)
+                        continue
+                except FileNotFoundError:
+                    pass
+                remote_store.save_artifact(project_name, session_id, stage, content)
+                pushed.append(stage)
+            except Exception as exc:
+                failed.append((stage, str(exc)))
         tracker.mark_synced()
 
         click.echo(f"✅ Synced {len(pushed)} stages")
         click.echo(f"   Stages: {', '.join(pushed)}")
         if skipped:
             click.echo(f"   Skipped (unchanged): {', '.join(skipped)}")
+        if failed:
+            click.echo(f"   Failed: {', '.join(stage for stage, _ in failed)}")
+            for stage, message in failed:
+                click.echo(f"     - {stage}: {message}")
         click.echo(f"   Timestamp: {tracker.get_status().get('last_sync')}")
 
     except Exception as e:
@@ -601,24 +617,31 @@ def pull(ctx, project: Optional[str], session_override: Optional[str], yes: bool
         click.echo(f"   Storage: {storage_backend}")
         click.echo(f"   Sync Source: {sync_backend}")
         artifacts = {}
+        failed = []
         for stage in DesignStoreFilesystem.STAGE_PATHS.keys():
             try:
                 artifacts[stage] = remote_store.load_artifact(project_name, session_id, stage)
             except FileNotFoundError:
                 continue
+            except Exception as exc:
+                failed.append((stage, str(exc)))
+                continue
         changed_stages = []
         for stage, content in artifacts.items():
-            if use_db:
-                try:
-                    local_record = db.load_artifact(project_name, session_id, stage)
-                    if local_record.content_hash == hash_content(content):
-                        continue
-                except FileNotFoundError:
-                    pass
-                db.save_artifact(project_name, session_id, stage, content)
-                changed_stages.append(stage)
-            else:
-                local_store.save_artifact(project_name, session_id, stage, content)
+            try:
+                if use_db:
+                    try:
+                        local_record = db.load_artifact(project_name, session_id, stage)
+                        if local_record.content_hash == hash_content(content):
+                            continue
+                    except FileNotFoundError:
+                        pass
+                    db.save_artifact(project_name, session_id, stage, content)
+                    changed_stages.append(stage)
+                else:
+                    local_store.save_artifact(project_name, session_id, stage, content)
+            except Exception as exc:
+                failed.append((stage, str(exc)))
         tracker.mark_synced()
 
         if use_db and changed_stages:
@@ -631,6 +654,10 @@ def pull(ctx, project: Optional[str], session_override: Optional[str], yes: bool
         click.echo(f"✅ Retrieved {len(artifacts)} stage artifacts")
         for stage in artifacts:
             click.echo(f"   ✓ {stage}")
+        if failed:
+            click.echo(f"   Failed: {', '.join(stage for stage, _ in failed)}")
+            for stage, message in failed:
+                click.echo(f"     - {stage}: {message}")
 
     except Exception as e:
         click.echo(f"❌ Error: {e}", err=True)
@@ -1061,6 +1088,207 @@ def docs():
     """Manage local IDSE reference docs and templates."""
     pass
 
+
+@main.group()
+def blueprint():
+    """Manage Blueprint promotion and governance controls."""
+    pass
+
+
+@blueprint.command("promote")
+@click.option("--project", help="Project name (uses current if not specified)")
+@click.option("--claim", "claim_text", required=True, help="Atomic claim to evaluate for promotion")
+@click.option(
+    "--classification",
+    required=True,
+    type=click.Choice(
+        ["invariant", "boundary", "ownership_rule", "non_negotiable_constraint"],
+        case_sensitive=False,
+    ),
+    help="Constitutional class for the claim",
+)
+@click.option(
+    "--source",
+    "source_refs",
+    multiple=True,
+    required=True,
+    help="Artifact reference in session:stage format (repeatable)",
+)
+@click.option("--min-days", default=7, show_default=True, help="Minimum temporal stability window")
+@click.option("--dry-run", is_flag=True, help="Evaluate without persisting promotion decision")
+@click.pass_context
+def blueprint_promote(
+    ctx,
+    project: Optional[str],
+    claim_text: str,
+    classification: str,
+    source_refs: tuple[str, ...],
+    min_days: int,
+    dry_run: bool,
+):
+    """Evaluate and promote converged intent into blueprint scope."""
+    from .artifact_database import ArtifactDatabase
+    from .blueprint_promotion import BlueprintPromotionGate
+    from .file_view_generator import FileViewGenerator
+    from .project_workspace import ProjectWorkspace
+
+    manager = ProjectWorkspace()
+    if project:
+        project_path = manager.projects_root / project
+    else:
+        project_path = manager.get_current_project()
+        if not project_path:
+            click.echo("❌ Error: No IDSE project found", err=True)
+            sys.exit(1)
+        project = project_path.name
+
+    parsed_sources: list[tuple[str, str]] = []
+    for ref in source_refs:
+        if ":" not in ref:
+            click.echo(f"❌ Error: Invalid --source '{ref}'. Expected session:stage.", err=True)
+            sys.exit(1)
+        session_id, stage = ref.split(":", 1)
+        parsed_sources.append((session_id.strip(), stage.strip()))
+
+    db = ArtifactDatabase(idse_root=manager.idse_root, allow_create=False)
+    gate = BlueprintPromotionGate(db)
+    decision = gate.evaluate_and_record(
+        project,
+        claim_text=claim_text,
+        classification=classification.lower(),
+        source_refs=parsed_sources,
+        min_convergence_days=min_days,
+        dry_run=dry_run,
+    )
+
+    click.echo(f"Blueprint Promotion Decision: {decision.status}")
+    if decision.failed_tests:
+        click.echo(f"Failed Tests: {', '.join(decision.failed_tests)}")
+    click.echo(f"Evidence Hash: {decision.evidence_hash}")
+    click.echo(
+        "Evidence: "
+        f"sessions={len(decision.evidence.get('source_sessions', []))}, "
+        f"stages={len(decision.evidence.get('source_stages', []))}, "
+        f"feedback={len(decision.evidence.get('feedback_artifacts', []))}"
+    )
+
+    if not dry_run:
+        generator = FileViewGenerator(idse_root=manager.idse_root, allow_create=False)
+        if decision.status == "ALLOW":
+            generator.apply_allowed_promotions_to_blueprint(project)
+        generator.generate_blueprint_meta(project)
+        click.echo("✅ Blueprint artifacts regenerated")
+
+
+@blueprint.command("extract-candidates")
+@click.option("--project", help="Project name (uses current if not specified)")
+@click.option(
+    "--stage",
+    "stages",
+    multiple=True,
+    help="Limit extraction to stage(s). Repeatable (intent,context,spec,plan,tasks,implementation,feedback). Defaults to intent/context/spec/implementation/feedback.",
+)
+@click.option("--min-sources", default=2, show_default=True, help="Minimum source references per candidate")
+@click.option("--min-sessions", default=2, show_default=True, help="Minimum unique sessions per candidate")
+@click.option("--min-stages", default=2, show_default=True, help="Minimum unique stages per candidate")
+@click.option("--limit", default=20, show_default=True, help="Maximum candidates to return")
+@click.option("--evaluate", is_flag=True, help="Also run promotion gate (dry-run) for each extracted candidate")
+@click.option("--min-days", default=7, show_default=True, help="Minimum temporal stability window for evaluation")
+@click.option("--json", "json_output", is_flag=True, help="Output candidates as JSON")
+def blueprint_extract_candidates(
+    project: Optional[str],
+    stages: tuple[str, ...],
+    min_sources: int,
+    min_sessions: int,
+    min_stages: int,
+    limit: int,
+    evaluate: bool,
+    min_days: int,
+    json_output: bool,
+):
+    """Extract cross-session blueprint promotion candidates from SQLite artifacts."""
+    import json
+
+    from .artifact_database import ArtifactDatabase
+    from .blueprint_promotion import BlueprintPromotionGate
+    from .project_workspace import ProjectWorkspace
+
+    manager = ProjectWorkspace()
+    if project:
+        project_path = manager.projects_root / project
+    else:
+        project_path = manager.get_current_project()
+        if not project_path:
+            click.echo("❌ Error: No IDSE project found", err=True)
+            sys.exit(1)
+        project = project_path.name
+
+    db = ArtifactDatabase(idse_root=manager.idse_root, allow_create=False)
+    gate = BlueprintPromotionGate(db)
+    candidates = gate.extract_candidates(
+        project,
+        stages=stages,
+        min_sources=min_sources,
+        min_sessions=min_sessions,
+        min_stages=min_stages,
+        limit=limit,
+    )
+
+    if not candidates:
+        click.echo("No candidates found for current thresholds.")
+        return
+
+    if json_output:
+        payload = []
+        for idx, candidate in enumerate(candidates, start=1):
+            item = {
+                "index": idx,
+                "claim_text": candidate.claim_text,
+                "suggested_classification": candidate.suggested_classification,
+                "support_count": candidate.support_count,
+                "session_count": candidate.session_count,
+                "stage_count": candidate.stage_count,
+                "source_refs": [f"{session}:{stage}" for session, stage in candidate.source_refs],
+            }
+            if evaluate:
+                decision = gate.evaluate_promotion(
+                    project,
+                    claim_text=candidate.claim_text,
+                    classification=candidate.suggested_classification,
+                    source_refs=candidate.source_refs,
+                    min_convergence_days=min_days,
+                )
+                item["evaluation"] = {
+                    "status": decision.status,
+                    "failed_tests": decision.failed_tests,
+                    "evidence_hash": decision.evidence_hash,
+                }
+            payload.append(item)
+        click.echo(json.dumps(payload, indent=2))
+        return
+
+    click.echo(f"Extracted {len(candidates)} candidate(s):")
+    for idx, candidate in enumerate(candidates, start=1):
+        click.echo(f"{idx}. {candidate.claim_text}")
+        click.echo(
+            f"   Suggested: {candidate.suggested_classification} | "
+            f"support={candidate.support_count} sessions={candidate.session_count} stages={candidate.stage_count}"
+        )
+        click.echo(
+            "   Sources: " + ", ".join(f"{session}:{stage}" for session, stage in candidate.source_refs)
+        )
+        if evaluate:
+            decision = gate.evaluate_promotion(
+                project,
+                claim_text=candidate.claim_text,
+                classification=candidate.suggested_classification,
+                source_refs=candidate.source_refs,
+                min_convergence_days=min_days,
+            )
+            summary = f"{decision.status} ({decision.evidence_hash[:12]})"
+            if decision.failed_tests:
+                summary += f" failed={','.join(decision.failed_tests)}"
+            click.echo(f"   Gate: {summary}")
 
 @docs.command("install")
 @click.option("--force", is_flag=True, help="Overwrite existing docs/templates")
@@ -1546,6 +1774,73 @@ def set_status(ctx, session_id: str, session_status: str, project: Optional[str]
             tracker.set_validation_status("passing")
 
         click.echo(f"✅ Status updated for {project_name}/{session_id}: {normalized_status}")
+    except Exception as e:
+        click.echo(f"❌ Error: {e}", err=True)
+        sys.exit(1)
+
+
+@session.command("set-stage")
+@click.argument("session_id")
+@click.option(
+    "--stage",
+    "stage_name",
+    required=True,
+    type=click.Choice(["intent", "context", "spec", "plan", "tasks", "implementation", "feedback"], case_sensitive=False),
+    help="Pipeline stage name",
+)
+@click.option(
+    "--status",
+    "stage_status",
+    required=True,
+    type=click.Choice(["pending", "in_progress", "completed"], case_sensitive=False),
+    help="Stage status",
+)
+@click.option("--project", help="Project name (uses current if not specified)")
+@click.pass_context
+def set_stage(ctx, session_id: str, stage_name: str, stage_status: str, project: Optional[str]):
+    """Set a single stage status in session state."""
+    from .artifact_config import ArtifactConfig
+    from .session_metadata import SessionMetadata
+    from .stage_state_model import StageStateModel
+    from .design_store_sqlite import DesignStoreSQLite
+
+    try:
+        manager, project_path, project_name = _resolve_project_path(project)
+        session_path = project_path / "sessions" / session_id
+        if not session_path.exists():
+            click.echo(f"❌ Error: Session '{session_id}' not found in project '{project_name}'", err=True)
+            sys.exit(1)
+
+        try:
+            metadata = SessionMetadata.load(session_path)
+            is_blueprint = metadata.is_blueprint
+        except FileNotFoundError:
+            is_blueprint = session_id == "__blueprint__"
+
+        config = ArtifactConfig(
+            ctx.obj.get("config_path") if ctx.obj else None,
+            backend_override=ctx.obj.get("backend_override") if ctx.obj else None,
+        )
+
+        if config.get_storage_backend() == "sqlite":
+            tracker = StageStateModel(
+                project_path=project_path,
+                store=DesignStoreSQLite(idse_root=manager.idse_root, allow_create=False),
+                project_name=project_name,
+                session_id=session_id,
+            )
+        else:
+            tracker = StageStateModel(project_path=project_path, session_id=session_id)
+
+        try:
+            tracker.get_status(project_name)
+        except FileNotFoundError:
+            tracker.init_state(project_name, session_id, is_blueprint=is_blueprint)
+
+        tracker.update_stage(stage_name.lower(), stage_status.lower())
+        click.echo(
+            f"✅ Stage updated for {project_name}/{session_id}: {stage_name.lower()} -> {stage_status.lower()}"
+        )
     except Exception as e:
         click.echo(f"❌ Error: {e}", err=True)
         sys.exit(1)

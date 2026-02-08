@@ -82,15 +82,21 @@ class FileViewGenerator:
         return registry_path
 
     def generate_blueprint_meta(self, project: str) -> Path:
+        self.ensure_blueprint_scope(project)
         sessions = self.db.list_session_metadata(project)
         sessions.sort(key=lambda s: (0 if s["session_id"] == "__blueprint__" else 1, s["created_at"]))
+        blueprint_meta = self.projects_root / project / "sessions" / "__blueprint__" / "metadata" / "meta.md"
+        existing_meta = blueprint_meta.read_text() if blueprint_meta.exists() else ""
+        preserved_narrative = _extract_custom_narrative(existing_meta)
+        active_statuses = {"draft", "in_progress", "review"}
 
         registry_lines = []
         matrix_rows = []
         for meta in sessions:
-            if meta["session_id"] == "__blueprint__":
+            is_active = meta["session_id"] == "__blueprint__" or meta.get("status") in active_statuses
+            if meta["session_id"] == "__blueprint__" and is_active:
                 registry_lines.append("- `__blueprint__` (THIS SESSION) - Project governance and roadmap")
-            else:
+            elif is_active:
                 description = meta.get("description") or "Feature session"
                 registry_lines.append(f"- `{meta['session_id']}` - {description}")
             progress = self._session_progress(project, meta["session_id"])
@@ -104,10 +110,12 @@ class FileViewGenerator:
             "| Session ID | Type | Status | Owner | Created | Progress |",
             "|------------|------|--------|-------|---------|----------|",
         ] + matrix_rows)
+        lineage_graph = self._build_lineage_graph(sessions)
         delivery_summary = self._build_delivery_summary(project, sessions)
         feedback_summary = self._build_feedback_summary(project, sessions)
+        promotion_records = self._build_promotion_records(project)
 
-        content = f"""# {project} - Blueprint Session Meta
+        content = f"""# {project} - Blueprint Meta
 
 ## Session Registry
 
@@ -123,18 +131,15 @@ This document tracks all sessions spawned from this Blueprint.
 ## Lineage Graph
 
 ```
-__blueprint__ (root)
+{lineage_graph}
 ```
 
 ## Governance
 
-This Blueprint defines:
-- Project-level intent and vision
-- Technical architecture constraints
-- Feature roadmap and dependencies
-- Session creation rules
-
-All Feature Sessions inherit from this Blueprint's context and specs.
+Authoritative scope is defined in `blueprint.md`.
+- `meta.md` is derived from runtime session state in SQLite.
+- Use `blueprint.md` to define or change project intent, constraints, and invariants.
+- Use `meta.md` to monitor delivery, feedback, and alignment across sessions.
 
 ## Feedback Loop
 
@@ -148,13 +153,148 @@ Feedback from Feature Sessions flows upward to inform Blueprint updates.
 
 {feedback_summary}
 
+## Blueprint Promotion Record
+
+{promotion_records}
+
+## Meta Narrative
+
+<!-- BEGIN CUSTOM NARRATIVE -->
+{preserved_narrative}
+<!-- END CUSTOM NARRATIVE -->
+
 ---
 *Last updated: {_now()}*
 """
-        blueprint_meta = self.projects_root / project / "sessions" / "__blueprint__" / "metadata" / "meta.md"
         blueprint_meta.parent.mkdir(parents=True, exist_ok=True)
         blueprint_meta.write_text(content)
         return blueprint_meta
+
+    def ensure_blueprint_scope(self, project: str) -> Path:
+        blueprint_scope = (
+            self.projects_root / project / "sessions" / "__blueprint__" / "metadata" / "blueprint.md"
+        )
+        if blueprint_scope.exists():
+            return blueprint_scope
+        blueprint_scope.parent.mkdir(parents=True, exist_ok=True)
+        blueprint_scope.write_text(
+            f"""# {project} - Blueprint
+
+> Append-only via promotion gate.
+
+## Purpose
+- Define project intent and long-lived outcomes.
+
+## System Boundaries
+- Define what is in scope and out of scope for this project.
+
+## Core Invariants
+- Record non-negotiable constraints the implementation must preserve.
+
+## High-Level Architecture
+- Describe major components, interfaces, and data ownership boundaries.
+
+## Stakeholders
+- List owners, collaborators, and impacted users/systems.
+
+## Constraints & Risks
+- Capture operational, technical, and governance constraints with mitigation strategy.
+
+## Promoted Converged Intent
+- No converged intent promoted yet.
+"""
+        )
+        return blueprint_scope
+
+    def apply_allowed_promotions_to_blueprint(self, project: str) -> Path:
+        path = self.ensure_blueprint_scope(project)
+        content = path.read_text()
+        marker = "## Promoted Converged Intent"
+        if marker not in content:
+            return path
+
+        rows = self.db.list_blueprint_promotions(project, status="ALLOW")
+        claims = [f"- [{row['classification']}] {row['claim_text']}" for row in rows]
+        if not claims:
+            return path
+
+        rebuilt = _append_unique_bullets_to_section(
+            content,
+            marker,
+            claims,
+            placeholder="- No converged intent promoted yet.",
+        )
+        by_section: Dict[str, List[str]] = {}
+        for row in rows:
+            heading = _resolve_blueprint_section(row["claim_text"], row["classification"])
+            by_section.setdefault(heading, []).append(f"- {row['claim_text']}")
+        for heading, bullets in by_section.items():
+            rebuilt = _append_unique_bullets_to_section(rebuilt, heading, bullets)
+        path.write_text(rebuilt)
+        return path
+
+    def _build_promotion_records(self, project: str) -> str:
+        rows = self.db.list_blueprint_promotions(project, status="ALLOW")
+        if not rows:
+            return "- No promoted claims recorded yet."
+        deduped: Dict[tuple[str, str], Dict] = {}
+        for row in rows:
+            key = (row["claim_text"], row["evidence_hash"])
+            current = deduped.get(key)
+            current_ts = (current or {}).get("promoted_at") or (current or {}).get("created_at") or ""
+            row_ts = row.get("promoted_at") or row.get("created_at") or ""
+            if current is None or row_ts > current_ts:
+                deduped[key] = row
+        ordered_rows = sorted(
+            deduped.values(),
+            key=lambda row: row.get("promoted_at") or row.get("created_at") or "",
+            reverse=True,
+        )
+        lines: List[str] = []
+        for row in ordered_rows:
+            evidence = row.get("evidence") or {}
+            sessions = evidence.get("source_sessions") or []
+            stages = evidence.get("source_stages") or []
+            feedback_artifacts = evidence.get("feedback_artifacts") or []
+            feedback_ids = [item.get("idse_id", "unknown") for item in feedback_artifacts]
+            lines.extend(
+                [
+                    f"- Date: {row.get('promoted_at') or row.get('created_at')}",
+                    f"  Promoted Claim: {row['claim_text']}",
+                    f"  Classification: {row['classification']}",
+                    f"  Source Sessions: {', '.join(sessions) if sessions else 'none'}",
+                    f"  Source Stages: {', '.join(stages) if stages else 'none'}",
+                    f"  Feedback Artifacts: {', '.join(feedback_ids) if feedback_ids else 'none'}",
+                    f"  Evidence Hash: {row['evidence_hash']}",
+                ]
+            )
+        return "\n".join(lines)
+
+    def _build_lineage_graph(self, sessions: List[Dict]) -> str:
+        by_parent: Dict[str, List[str]] = {}
+        session_ids = {session["session_id"] for session in sessions}
+        for session in sessions:
+            session_id = session["session_id"]
+            if session_id == "__blueprint__":
+                continue
+            parent = session.get("parent_session") or "__blueprint__"
+            if parent not in session_ids:
+                parent = "__blueprint__"
+            by_parent.setdefault(parent, []).append(session_id)
+
+        lines: List[str] = ["__blueprint__ (root)"]
+
+        def walk(parent: str, prefix: str) -> None:
+            children = sorted(by_parent.get(parent, []))
+            for idx, child in enumerate(children):
+                is_last = idx == len(children) - 1
+                connector = "└── " if is_last else "├── "
+                lines.append(f"{prefix}{connector}{child}")
+                child_prefix = f"{prefix}{'    ' if is_last else '│   '}"
+                walk(child, child_prefix)
+
+        walk("__blueprint__", "")
+        return "\n".join(lines)
 
     def _session_progress(self, project: str, session_id: str) -> int:
         try:
@@ -209,13 +349,19 @@ Feedback from Feature Sessions flows upward to inform Blueprint updates.
         if "[REQUIRES INPUT]" in content:
             return []
 
-        section = _extract_markdown_section_variants(
-            content, ["Summary", "Executive Summary"]
+        bullets = _extract_summary_bullets(
+            content,
+            [
+                "Summary",
+                "Executive Summary",
+                "Completion Record",
+                "Workflow",
+                "Fixes",
+                "Validation",
+            ],
         )
-        if section:
-            bullets = _extract_bullets(section)
-            if bullets:
-                return [_truncate(item, 200) for item in bullets[:3]]
+        if bullets:
+            return [_truncate(item, 200) for item in bullets[:5]]
 
         # Fallback: first sentence-like line in the implementation artifact.
         for line in content.splitlines():
@@ -237,13 +383,19 @@ Feedback from Feature Sessions flows upward to inform Blueprint updates.
         if "[REQUIRES INPUT]" in content:
             return []
 
-        section = _extract_markdown_section_variants(
-            content, ["Summary", "Lessons Learned", "Executive Summary"]
+        bullets = _extract_summary_bullets(
+            content,
+            [
+                "Summary",
+                "Lessons Learned",
+                "Completion Notes",
+                "Decision Log",
+                "Validation",
+                "Executive Summary",
+            ],
         )
-        if section:
-            bullets = _extract_bullets(section)
-            if bullets:
-                return [_truncate(item, 200) for item in bullets[:3]]
+        if bullets:
+            return [_truncate(item, 200) for item in bullets[:5]]
 
         for line in content.splitlines():
             stripped = line.strip()
@@ -313,6 +465,96 @@ def _extract_bullets(section: str) -> List[str]:
         elif stripped.startswith("* "):
             bullets.append(stripped[2:].strip())
     return [item for item in bullets if item and not _is_placeholder_text(item)]
+
+
+def _extract_summary_bullets(content: str, section_names: List[str]) -> List[str]:
+    # Prefer explicit summary-style sections first.
+    collected: List[str] = []
+    for section_name in section_names:
+        section = _extract_markdown_section_variants(content, [section_name])
+        if not section:
+            continue
+        for item in _extract_bullets(section):
+            if item not in collected:
+                collected.append(item)
+    if collected:
+        return collected
+
+    # Fallback to any bullets in the document.
+    all_bullets = _extract_bullets(content)
+    deduped: List[str] = []
+    for item in all_bullets:
+        if item not in deduped:
+            deduped.append(item)
+    return deduped
+
+
+def _extract_custom_narrative(content: str) -> str:
+    begin = "<!-- BEGIN CUSTOM NARRATIVE -->"
+    end = "<!-- END CUSTOM NARRATIVE -->"
+    if begin in content and end in content:
+        start = content.index(begin) + len(begin)
+        finish = content.index(end, start)
+        narrative = content[start:finish].strip("\n")
+        if narrative.strip():
+            return narrative
+    return (
+        "Use this section for high-detail meta context that should survive metadata regeneration.\n"
+        "- Architecture rationale\n"
+        "- Cross-session decisions\n"
+        "- Risks and mitigation notes"
+    )
+
+
+def _append_unique_bullets_to_section(
+    content: str,
+    heading: str,
+    bullets: List[str],
+    *,
+    placeholder: Optional[str] = None,
+) -> str:
+    if heading not in content:
+        return content
+
+    section_start = content.index(heading) + len(heading)
+    tail = content[section_start:]
+    next_heading_idx = tail.find("\n## ")
+    if next_heading_idx == -1:
+        section_body = tail.strip("\n")
+        suffix = ""
+    else:
+        section_body = tail[:next_heading_idx].strip("\n")
+        suffix = tail[next_heading_idx:]
+
+    existing_lines = [line.strip() for line in section_body.splitlines() if line.strip()]
+    merged = list(existing_lines)
+    if placeholder:
+        merged = [line for line in merged if line != placeholder]
+    for bullet in bullets:
+        if bullet not in merged:
+            merged.append(bullet)
+    if not merged and placeholder:
+        merged = [placeholder]
+
+    rebuilt = content[:section_start] + "\n" + "\n".join(merged)
+    if suffix:
+        rebuilt += suffix
+    return rebuilt
+
+
+def _resolve_blueprint_section(claim_text: str, classification: str) -> str:
+    lowered = claim_text.lower()
+    if any(token in lowered for token in ["documentation os", "purpose", "intent-driven systems engineering"]):
+        return "## Purpose"
+    if classification == "boundary" or any(token in lowered for token in ["in scope", "out of scope", "boundary"]):
+        return "## System Boundaries"
+    if classification == "ownership_rule" or any(token in lowered for token in ["owner", "ownership", "collaborator", "stakeholder"]):
+        return "## Stakeholders"
+    if any(token in lowered for token in ["architecture", "component", "interface", "data ownership"]):
+        return "## High-Level Architecture"
+    if classification == "invariant":
+        return "## Core Invariants"
+    return "## Constraints & Risks"
 
 
 def _normalize_heading_name(name: str) -> str:

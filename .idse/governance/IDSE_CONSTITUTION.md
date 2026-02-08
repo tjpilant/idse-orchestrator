@@ -82,3 +82,37 @@ All bootstrap actions MUST be recorded:
 2. All pipeline-driven updates to these metadata files MUST target the metadata directory resolved via the authoritative pointer `projects/<project>/CURRENT_SESSION`.
 3. Project-root metadata files MAY exist for discoverability but are read-only; writing to project-root or legacy stage-root metadata locations is **forbidden** after the grace period.
 4. Validators and CI MUST warn/fail on missing session metadata or writes to non-canonical metadata locations.
+
+## Article XI — Blueprint Convergence & Metadata Governance
+
+### Section 1 — Blueprint and Meta Authority
+1. `blueprint.md` is constitutional scope and contains only converged intent.
+2. `meta.md` is a derived runtime oversight report generated from SQLite state.
+3. Scope changes are recorded in `blueprint.md`; delivery and status telemetry are recorded in `meta.md`.
+
+### Section 2 — Promotion Gate Requirement
+1. New blueprint claims MUST pass the promotion gate before entering `blueprint.md`.
+2. Minimum gate checks are mandatory:
+   - Session diversity (multi-session evidence)
+   - Stage diversity (multi-stage evidence)
+   - Feedback survival (no unresolved contradiction)
+   - Temporal stability window
+3. Every ALLOW decision MUST be persisted with evidence and included in `meta.md` promotion records.
+
+### Section 3 — SQLite Source-of-Truth
+1. SQLite is the authoritative store for sessions, artifacts, state, and promotion evidence.
+2. Markdown files under `.idse/projects/...` are generated views.
+3. Direct markdown edits are non-authoritative unless ingested through approved DB write paths.
+
+### Section 4 — Blueprint Projection Rules
+1. `Promoted Converged Intent` in `blueprint.md` is append-only ledger history.
+2. Allowed claims MUST also be projected into canonical sections (`Purpose`, `Core Invariants`, etc.) for readability.
+3. Projection MUST NOT bypass or replace ledger history.
+
+### Section 5 — Session Registry Semantics
+1. `Active Sessions` in `meta.md` includes only sessions with status `draft`, `in_progress`, or `review`, plus `__blueprint__`.
+2. Session matrices and lineage views MUST include all known sessions, including `complete` and `archived`.
+
+### Section 6 — Promotion Record Hygiene
+1. Presentation of promotion records in `meta.md` MUST dedupe by `claim_text + evidence_hash`, keeping the latest entry.
+2. Underlying SQLite records remain immutable audit history.
