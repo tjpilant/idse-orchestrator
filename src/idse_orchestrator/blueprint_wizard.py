@@ -148,6 +148,32 @@ This directory contains documentation about implementation progress.
 ## Architecture
 [To be filled]
 
+## What Was Built
+[To be filled]
+
 ## Validation Reports
 [To be filled]
+
+## Deviations from Plan
+[To be filled]
+
+## Component Impact Report
+
+### Modified Components
+- **ComponentName** (source_module.py)
+  - Parent Primitives: PrimitiveA, PrimitiveB
+  - Type: Projection/Operation/Infrastructure/Routing
+  - Changes: [brief description]
+
+### New Components Created
+- **NewComponentName** (source_module.py)
+  - Parent Primitive: PrimitiveA
+  - Type: Operation
+  - Purpose: [one-line description]
+  - Area: [Foundation/Core Loop/Platform/Validation/Governance/Artifacts/Sync/Storage/Coordination/CLI/Compilation]
+  - Layer: IDSE
+  - Milestone: MVP
+
+### Files Edited (no component mapping)
+- [List files that don't map to tracked components]
 """

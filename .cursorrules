@@ -21,6 +21,14 @@ Before generating ANY code:
 - Don't add features not in the spec
 - Don't deviate from the implementation strategy
 
+## Three-Tier Reasoning (Condensed)
+
+Every code change must trace: Artifact (evidence) -> Component (realization) -> Primitive (authority).
+- Declare all created/modified components in `implementation/README.md`
+- Name the parent primitive for every component you touch
+- If you cannot trace to a primitive, stop and ask
+- Read your profile from `agent_registry.json` for full tier access rules
+
 ## Post-Code Documentation
 
 After coding:

@@ -407,3 +407,139 @@ def test_save_artifact_pushes_upstream_dependency_relations(tmp_path, monkeypatc
     ]
     assert relation_updates, "expected relation update payload"
     assert relation_updates[-1]["data"]["properties"]["Upstream Artifact"] == ["page-dep-1"]
+
+
+def test_save_artifact_fallback_create_parent_uses_typed_database_parent(monkeypatch):
+    store = NotionDesignStore(database_id="db123")
+    store.tool_names["create_page"] = "fallback-create-tool"
+    monkeypatch.setattr(store, "_should_skip_push", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(store, "_resolve_page_id", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(store, "_load_session_context", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(
+        store,
+        "_build_create_properties",
+        lambda **_kwargs: {"properties": {"Stage": {"select": {"name": "Intent"}}}, "content_payload": "hello"},
+    )
+    monkeypatch.setattr(
+        store,
+        "_build_update_properties",
+        lambda **_kwargs: {"properties": {}, "content_payload": "hello"},
+    )
+    monkeypatch.setattr(store, "_save_push_metadata", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(store, "_sync_dependencies_to_remote", lambda *_args, **_kwargs: None)
+
+    calls = []
+
+    def fake_call(tool_name, payload):
+        calls.append((tool_name, payload))
+        return {"id": "page-fallback-typed"}
+
+    monkeypatch.setattr(store, "_call_tool", fake_call)
+
+    store.save_artifact("demo", "s1", "intent", "hello")
+    assert calls
+    tool_name, payload = calls[0]
+    assert tool_name == "fallback-create-tool"
+    assert payload["parent"] == {"type": "database_id", "database_id": "db123"}
+
+
+def test_save_artifact_notion_create_pages_payload_structure(monkeypatch):
+    store = NotionDesignStore(database_id="db123")
+    store.tool_names["create_page"] = "notion-create-pages"
+    monkeypatch.setattr(store, "_should_skip_push", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(store, "_resolve_page_id", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(store, "_load_session_context", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(
+        store,
+        "_build_create_properties",
+        lambda **_kwargs: {
+            "properties": {
+                "Title": {"title": [{"plain_text": "Intent - s1"}]},
+                "Stage": {"select": {"name": "Intent"}},
+            },
+            "content_payload": "body text",
+        },
+    )
+    monkeypatch.setattr(
+        store,
+        "_build_update_properties",
+        lambda **_kwargs: {"properties": {}, "content_payload": "body text"},
+    )
+    monkeypatch.setattr(store, "_save_push_metadata", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(store, "_sync_dependencies_to_remote", lambda *_args, **_kwargs: None)
+
+    calls = []
+
+    def fake_call(tool_name, payload):
+        calls.append((tool_name, payload))
+        return {"id": "page-created-typed"}
+
+    monkeypatch.setattr(store, "_call_tool", fake_call)
+
+    store.save_artifact("demo", "s1", "intent", "body text")
+    assert calls
+    tool_name, payload = calls[0]
+    assert tool_name == "notion-create-pages"
+    assert "pages" in payload and isinstance(payload["pages"], list)
+    assert payload["parent"] == {"type": "database_id", "database_id": "db123"}
+    assert payload["pages"][0]["content"] == "body text"
+
+
+def test_save_artifact_update_path_uses_update_and_replace_not_create(monkeypatch):
+    store = NotionDesignStore(database_id="db123")
+    monkeypatch.setattr(store, "_should_skip_push", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(store, "_resolve_page_id", lambda *_args, **_kwargs: "existing-page-1")
+    monkeypatch.setattr(store, "_load_session_context", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(
+        store,
+        "_build_create_properties",
+        lambda **_kwargs: {"properties": {"Title": {"title": [{"plain_text": "x"}]}}, "content_payload": "new"},
+    )
+    monkeypatch.setattr(
+        store,
+        "_build_update_properties",
+        lambda **_kwargs: {"properties": {"Stage": {"select": {"name": "Intent"}}}, "content_payload": "new"},
+    )
+    monkeypatch.setattr(store, "_save_push_metadata", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(store, "_sync_dependencies_to_remote", lambda *_args, **_kwargs: None)
+
+    calls = []
+
+    def fake_call(tool_name, payload):
+        calls.append((tool_name, payload))
+        return {"ok": True}
+
+    monkeypatch.setattr(store, "_call_tool", fake_call)
+    store.save_artifact("demo", "s1", "intent", "new")
+
+    assert calls
+    assert all(tool != store.tool_names["create_page"] for tool, _ in calls)
+    update_cmds = [payload.get("data", {}).get("command") for tool, payload in calls if tool == store.tool_names["update_page"]]
+    assert "update_properties" in update_cmds
+    assert "replace_content" in update_cmds
+
+
+def test_save_artifact_update_path_excludes_title_field(monkeypatch):
+    store = NotionDesignStore(database_id="db123")
+    monkeypatch.setattr(store, "_should_skip_push", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(store, "_resolve_page_id", lambda *_args, **_kwargs: "existing-page-2")
+    monkeypatch.setattr(store, "_save_push_metadata", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(store, "_sync_dependencies_to_remote", lambda *_args, **_kwargs: None)
+
+    calls = []
+
+    def fake_call(tool_name, payload):
+        calls.append((tool_name, payload))
+        return {"ok": True}
+
+    monkeypatch.setattr(store, "_call_tool", fake_call)
+    store.save_artifact("demo", "s2", "plan", "updated body")
+
+    prop_payloads = [
+        payload.get("data", {}).get("properties", {})
+        for tool, payload in calls
+        if tool == store.tool_names["update_page"]
+        and payload.get("data", {}).get("command") == "update_properties"
+    ]
+    assert prop_payloads
+    assert "Title" not in prop_payloads[0]

@@ -250,7 +250,7 @@ class NotionDesignStore(MCPDesignStoreAdapter):
             return
 
         payload = {
-            "parent": {"database_id": self.database_id},
+            "parent": {"type": "database_id", "database_id": self.database_id},
             "properties": create_payload["properties"],
         }
         if create_payload["content_payload"] is not None:

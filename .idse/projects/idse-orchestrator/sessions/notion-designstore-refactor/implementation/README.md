@@ -212,3 +212,32 @@ Created: 2026-02-07T21:34:19.010190
 - Added demotion gate enforcement in `BlueprintPromotionGate.demote_claim()` and CLI lifecycle operations: `idse blueprint claims` and `idse blueprint demote`.
 - Updated blueprint projection semantics: canonical sections are rebuilt from active claims; append-only promoted ledger remains immutable history.
 - Updated `meta.md` generation to include lifecycle state on promotion records and a dedicated demotion record section.
+
+## Item 7 Completion — Agent Profile Injection
+- Updated `.idse/projects/idse-orchestrator/agent_registry.json` to include `profile` and `tier_access` for all registered agents.
+- Added planner-focused `Three-Tier Reasoning Rules` section to `CLAUDE.md`.
+- Added role-aware `Three-Tier Reasoning Rules` section to `AGENTS.md` covering planner, implementer, validator, and architect profiles.
+- Added condensed tier reasoning block to `.cursorrules` including mandatory chain and component declaration requirements.
+- Verification completed:
+  - `grep -c "Three-Tier" CLAUDE.md AGENTS.md .cursorrules` => all three files include the section.
+  - `PYTHONPATH=src .venv/bin/pytest -q` => `102 passed`.
+
+## Item 8 Completion — Implementation Scaffold + Wizard Fallback
+- Added new template file: `src/idse_orchestrator/resources/templates/implementation-scaffold.md`.
+- Template now includes Architecture, What Was Built, Validation Reports, Deviations from Plan, and Component Impact Report sections.
+- Updated wizard fallback in `src/idse_orchestrator/blueprint_wizard.py` (`_generate_implementation_stub`) to include the same Component Impact Report structure.
+- Verified scaffold path by creating session `item8-test-session`; generated `implementation/README.md` contains the new Component Impact Report block.
+
+## Item 9 Completion — Notion Sync E2E Verification & Fix
+- Fixed fallback create payload parent format in `src/idse_orchestrator/design_store_notion.py`:
+  - from: `{"parent": {"database_id": ...}}`
+  - to: `{"parent": {"type": "database_id", "database_id": ...}}`
+- Added 4 tests in `tests/test_design_store_notion.py`:
+  - fallback create path uses typed database parent
+  - `notion-create-pages` payload structure (`pages` + `parent`)
+  - update path uses `update_properties` + `replace_content` (not create)
+  - update path excludes `Title` (create_only field)
+- Verification:
+  - `PYTHONPATH=src .venv/bin/pytest tests/test_design_store_notion.py -v` => `22 passed`
+  - `PYTHONPATH=src .venv/bin/pytest -q` => `106 passed`
+  - Live E2E: `PYTHONPATH=src .venv/bin/idse sync push --debug --yes --project idse-orchestrator` executed and reached update path calls per stage.

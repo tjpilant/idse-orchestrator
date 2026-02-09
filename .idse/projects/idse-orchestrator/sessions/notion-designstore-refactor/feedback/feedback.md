@@ -127,3 +127,17 @@
 - Resolved prior governance gaps: demotion is now auditable, canonical sections are no longer sticky after demotion, and integrity mismatch handling has explicit event history plus opt-in acceptance.
 - Added deterministic lifecycle visibility in `meta.md`, which improves blueprint governance observability for agents and CI workflows.
 - Constraint discovered: `blueprint_claims.promotion_record_id` FK requires seeded promotion records in tests; tests were updated to reflect real lifecycle provenance.
+
+## Item 7 Feedback
+- Tier reasoning guidance now has explicit per-role text in repo-level agent instructions, reducing ambiguity about primitive/component/artifact boundaries during implementation and review.
+- Registry extension (`profile`, `tier_access`) is currently instruction-facing governance metadata and does not yet have dedicated DB schema persistence in `agents` tables.
+- Hook runtime behavior was not re-executed in this pass; existing enforcement script remains unchanged.
+
+## Item 8 Feedback
+- Template variables remain literal placeholders (`{{ project_name }}`, `{{ session_id }}`, `{{ stack }}`, `{{ timestamp }}`) in generated files because current template substitution logic performs minimal token replacement and does not inject `session_id`.
+- This is acceptable for now per Item 8 scope, but full variable rendering should be handled in a future template engine alignment pass.
+
+## Item 9 Feedback
+- Live sync push reached `notion-update-page` update path for all stages, confirming create-vs-update routing is operating.
+- Runtime failure observed across all stages: Notion API validation error `Property "Project" not found` (HTTP 400) from the target database schema.
+- This is a schema/config mismatch outside Item 9 fallback-parent fix scope; code currently still sends `Project` in update payload for this workspace.

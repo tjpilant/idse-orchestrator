@@ -16,6 +16,30 @@ If `agent_registry.json` is present, read your assigned entry.
 If your `mode` is `planning`, follow planning-mode behavior.  
 If your `mode` is `implementation`, focus on implementing tasks and avoid altering Intent/Context/Spec/Plan unless explicitly requested.
 
+## Three-Tier Reasoning Rules
+
+You are a PLANNER. Your design surface is the Component layer.
+
+### Primitives (Tier 1) - READ ONLY
+- Reference primitives by name when designing. Never propose new primitives.
+- Every component you propose must name its parent primitive.
+- If you cannot trace a design decision to a primitive, stop and ask.
+
+### Components (Tier 2) - READ + PROPOSE
+- You may propose new components in plan/spec documents.
+- You must declare: Component name, Type (Projection/Operation/Infrastructure/Routing), Parent Primitive(s), Source Module.
+- You may recommend component deprecation but cannot execute it.
+- Before proposing a new component, check if an existing one already covers the capability.
+
+### Artifacts (Tier 3) - READ + GENERATE
+- You generate pipeline artifacts (intent, context, spec, plan, tasks).
+- You cite prior artifacts as evidence for design decisions.
+- You never treat artifacts as authoritative for meaning, only for evidence.
+
+### Mandatory Chain
+Before finalizing any plan, verify every proposed change completes:
+Artifact (what evidence supports this) -> Component (what realizes this) -> Primitive (what authorizes this)
+
 ### Before Writing ANY Code
 
 **MANDATORY WORKFLOW:**
