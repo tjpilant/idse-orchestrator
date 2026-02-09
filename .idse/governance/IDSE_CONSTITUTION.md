@@ -116,3 +116,31 @@ All bootstrap actions MUST be recorded:
 ### Section 6 — Promotion Record Hygiene
 1. Presentation of promotion records in `meta.md` MUST dedupe by `claim_text + evidence_hash`, keeping the latest entry.
 2. Underlying SQLite records remain immutable audit history.
+
+## Article XII — Claim Demotion & Supersession
+
+### Section 1 — Claim Lifecycle
+1. Promoted blueprint claims have lifecycle states: `active`, `superseded`, or `invalidated`.
+2. Promotion records are immutable audit entries and MUST NOT be deleted or rewritten.
+3. Claim lifecycle transitions MUST be persisted in `claim_lifecycle_events`.
+
+### Section 2 — Demotion Triggers
+1. Feedback evidence contradicts the claim.
+2. Successful implementation demonstrates the claim no longer holds.
+3. A newer claim supersedes an older claim.
+
+### Section 3 — Demotion Semantics
+1. Demotion never deletes history; it updates lifecycle state and appends lifecycle events.
+2. Demoted claims MUST be excluded from canonical blueprint section projections.
+3. Canonical sections are rebuilt from active claims; they are not append-only views.
+4. Demotion events (reason, actor, transition) MUST be rendered in `meta.md`.
+
+### Section 4 — Demotion Authority
+1. Demotion requires documented evidence and must pass a demotion gate.
+2. Minimum demotion gate checks are required:
+   - Non-empty reason
+   - Named actor
+   - Target claim exists and is currently `active`
+3. Manual edits to markdown views are non-authoritative unless ingested and approved through governance gates.
+
+Review surfaces are proposal layers. Authority requires pipeline ingestion plus governance gates.

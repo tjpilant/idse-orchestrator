@@ -164,6 +164,67 @@ class BlueprintPromotionGate:
         )
         return decision
 
+    def demote_claim(
+        self,
+        project: str,
+        *,
+        claim_id: int,
+        reason: str,
+        new_status: str = "invalidated",
+        actor: str = "system",
+        superseding_claim_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        if new_status not in {"superseded", "invalidated"}:
+            raise ValueError(f"Invalid demotion status: {new_status}")
+        if not reason.strip():
+            raise ValueError("Demotion reason is required (Article XII Section 4).")
+        if new_status == "superseded" and superseding_claim_id is None:
+            raise ValueError("superseding_claim_id required for 'superseded' status.")
+
+        claims = self.db.get_blueprint_claims(project)
+        claim = next((item for item in claims if int(item["claim_id"]) == int(claim_id)), None)
+        if claim is None:
+            raise ValueError(f"Claim {claim_id} not found.")
+        if claim["status"] != "active":
+            raise ValueError(
+                f"Claim {claim_id} is '{claim['status']}', only active claims can be demoted."
+            )
+
+        if superseding_claim_id is not None:
+            superseding = next(
+                (item for item in claims if int(item["claim_id"]) == int(superseding_claim_id)),
+                None,
+            )
+            if superseding is None:
+                raise ValueError(f"Superseding claim {superseding_claim_id} not found.")
+            if superseding["status"] != "active":
+                raise ValueError(f"Superseding claim {superseding_claim_id} is not active.")
+
+        old_status = str(claim["status"])
+        self.db.update_claim_status(
+            int(claim_id),
+            new_status,
+            supersedes_claim_id=superseding_claim_id,
+        )
+        self.db.record_lifecycle_event(
+            int(claim_id),
+            project,
+            old_status,
+            new_status,
+            reason,
+            actor=actor,
+            superseding_claim_id=superseding_claim_id,
+        )
+        return {
+            "claim_id": int(claim_id),
+            "claim_text": str(claim["claim_text"]),
+            "old_status": old_status,
+            "new_status": new_status,
+            "reason": reason,
+            "actor": actor,
+            "superseding_claim_id": superseding_claim_id,
+        }
+
     def extract_candidates(
         self,
         project: str,

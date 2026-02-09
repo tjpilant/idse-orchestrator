@@ -121,3 +121,9 @@
 ## Amendment Feedback
 - Constitution amendment scope now matches implemented behavior: active sessions filtered by status, complete lineage graph rendering, and promotion record dedupe in meta output.
 - Remaining follow-up: optionally add supersedes metadata on promotion records to reduce semantic redundancy in historical claims.
+
+
+## Governance Hardening Feedback
+- Resolved prior governance gaps: demotion is now auditable, canonical sections are no longer sticky after demotion, and integrity mismatch handling has explicit event history plus opt-in acceptance.
+- Added deterministic lifecycle visibility in `meta.md`, which improves blueprint governance observability for agents and CI workflows.
+- Constraint discovered: `blueprint_claims.promotion_record_id` FK requires seeded promotion records in tests; tests were updated to reflect real lifecycle provenance.

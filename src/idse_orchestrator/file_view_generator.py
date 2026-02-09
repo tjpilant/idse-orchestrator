@@ -4,8 +4,9 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 import json
 import re
+import warnings
 
-from .artifact_database import ArtifactDatabase
+from .artifact_database import ArtifactDatabase, hash_content
 from .design_store import DesignStoreFilesystem
 
 
@@ -83,6 +84,9 @@ class FileViewGenerator:
 
     def generate_blueprint_meta(self, project: str) -> Path:
         self.ensure_blueprint_scope(project)
+        integrity_warning = self.verify_blueprint_integrity(project)
+        if integrity_warning:
+            warnings.warn(integrity_warning, stacklevel=2)
         sessions = self.db.list_session_metadata(project)
         sessions.sort(key=lambda s: (0 if s["session_id"] == "__blueprint__" else 1, s["created_at"]))
         blueprint_meta = self.projects_root / project / "sessions" / "__blueprint__" / "metadata" / "meta.md"
@@ -114,6 +118,7 @@ class FileViewGenerator:
         delivery_summary = self._build_delivery_summary(project, sessions)
         feedback_summary = self._build_feedback_summary(project, sessions)
         promotion_records = self._build_promotion_records(project)
+        demotion_records = self._build_demotion_records(project)
 
         content = f"""# {project} - Blueprint Meta
 
@@ -156,6 +161,10 @@ Feedback from Feature Sessions flows upward to inform Blueprint updates.
 ## Blueprint Promotion Record
 
 {promotion_records}
+
+## Demotion Record
+
+{demotion_records}
 
 ## Meta Narrative
 
@@ -206,8 +215,12 @@ Feedback from Feature Sessions flows upward to inform Blueprint updates.
         )
         return blueprint_scope
 
-    def apply_allowed_promotions_to_blueprint(self, project: str) -> Path:
+    def apply_allowed_promotions_to_blueprint(self, project: str, *, accept_mismatch: bool = False) -> Path:
         path = self.ensure_blueprint_scope(project)
+        integrity_warning = self.verify_blueprint_integrity(project)
+        if integrity_warning:
+            warnings.warn(integrity_warning, stacklevel=2)
+        mismatch_unresolved = integrity_warning is not None and not accept_mismatch
         content = path.read_text()
         marker = "## Promoted Converged Intent"
         if marker not in content:
@@ -224,19 +237,75 @@ Feedback from Feature Sessions flows upward to inform Blueprint updates.
             claims,
             placeholder="- No converged intent promoted yet.",
         )
-        by_section: Dict[str, List[str]] = {}
+        existing_claims = self.db.get_blueprint_claims(project)
+        existing_claim_texts = {claim["claim_text"] for claim in existing_claims}
         for row in rows:
+            if row["claim_text"] not in existing_claim_texts:
+                self.db.save_blueprint_claim(
+                    project,
+                    claim_text=row["claim_text"],
+                    classification=row["classification"],
+                    promotion_record_id=row["id"],
+                )
+        active_claim_texts = {
+            claim["claim_text"] for claim in self.db.get_blueprint_claims(project, status="active")
+        }
+        active_rows = [row for row in rows if row["claim_text"] in active_claim_texts]
+
+        by_section: Dict[str, List[str]] = {}
+        for row in active_rows:
             heading = _resolve_blueprint_section(row["claim_text"], row["classification"])
             by_section.setdefault(heading, []).append(f"- {row['claim_text']}")
-        for heading, bullets in by_section.items():
-            rebuilt = _append_unique_bullets_to_section(rebuilt, heading, bullets)
+
+        section_heads = [
+            "## Purpose",
+            "## System Boundaries",
+            "## Core Invariants",
+            "## High-Level Architecture",
+            "## Stakeholders",
+            "## Constraints & Risks",
+        ]
+        for heading in section_heads:
+            rebuilt = _rebuild_section_bullets(rebuilt, heading, by_section.get(heading, []))
         path.write_text(rebuilt)
+        if accept_mismatch and integrity_warning:
+            stored = self.db.get_blueprint_hash(project)
+            self.db.record_integrity_event(
+                project,
+                expected_hash=stored or "",
+                actual_hash=hash_content(rebuilt),
+                action="accept",
+            )
+        if not mismatch_unresolved:
+            self.db.save_blueprint_hash(project, hash_content(rebuilt))
         return path
+
+    def verify_blueprint_integrity(self, project: str) -> Optional[str]:
+        path = self.ensure_blueprint_scope(project)
+        if not path.exists():
+            return None
+        expected_hash = self.db.get_blueprint_hash(project)
+        if not expected_hash:
+            return None
+        actual_hash = hash_content(path.read_text())
+        if actual_hash == expected_hash:
+            return None
+        self.db.record_integrity_event(
+            project,
+            expected_hash=expected_hash,
+            actual_hash=actual_hash,
+            action="warn",
+        )
+        return (
+            "Blueprint integrity mismatch detected: "
+            f"expected {expected_hash[:12]}..., got {actual_hash[:12]}...."
+        )
 
     def _build_promotion_records(self, project: str) -> str:
         rows = self.db.list_blueprint_promotions(project, status="ALLOW")
         if not rows:
             return "- No promoted claims recorded yet."
+        all_claims = {claim["claim_text"]: claim for claim in self.db.get_blueprint_claims(project)}
         deduped: Dict[tuple[str, str], Dict] = {}
         for row in rows:
             key = (row["claim_text"], row["evidence_hash"])
@@ -266,8 +335,29 @@ Feedback from Feature Sessions flows upward to inform Blueprint updates.
                     f"  Source Stages: {', '.join(stages) if stages else 'none'}",
                     f"  Feedback Artifacts: {', '.join(feedback_ids) if feedback_ids else 'none'}",
                     f"  Evidence Hash: {row['evidence_hash']}",
+                    f"  Lifecycle: {all_claims.get(row['claim_text'], {}).get('status', 'unknown')}",
                 ]
             )
+        return "\n".join(lines)
+
+    def _build_demotion_records(self, project: str) -> str:
+        events = self.db.get_lifecycle_events(project)
+        demotions = [event for event in events if event["new_status"] in {"superseded", "invalidated"}]
+        if not demotions:
+            return "- No demotion events recorded."
+        lines: List[str] = []
+        for event in demotions:
+            lines.extend(
+                [
+                    f"- Date: {event['created_at']}",
+                    f"  Claim ID: {event['claim_id']}",
+                    f"  Transition: {event['old_status']} -> {event['new_status']}",
+                    f"  Reason: {event['reason']}",
+                    f"  Actor: {event['actor']}",
+                ]
+            )
+            if event.get("superseding_claim_id"):
+                lines.append(f"  Superseded by: claim {event['superseding_claim_id']}")
         return "\n".join(lines)
 
     def _build_lineage_graph(self, sessions: List[Dict]) -> str:
@@ -536,6 +626,34 @@ def _append_unique_bullets_to_section(
     if not merged and placeholder:
         merged = [placeholder]
 
+    rebuilt = content[:section_start] + "\n" + "\n".join(merged)
+    if suffix:
+        rebuilt += suffix
+    return rebuilt
+
+
+def _rebuild_section_bullets(content: str, heading: str, bullets: List[str]) -> str:
+    if heading not in content:
+        return content
+    section_start = content.index(heading) + len(heading)
+    tail = content[section_start:]
+    next_heading_idx = tail.find("\n## ")
+    if next_heading_idx == -1:
+        section_body = tail.strip("\n")
+        suffix = ""
+    else:
+        section_body = tail[:next_heading_idx].strip("\n")
+        suffix = tail[next_heading_idx:]
+
+    preamble = []
+    for line in section_body.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("- "):
+            continue
+        preamble.append(stripped)
+    merged = preamble + bullets
     rebuilt = content[:section_start] + "\n" + "\n".join(merged)
     if suffix:
         rebuilt += suffix

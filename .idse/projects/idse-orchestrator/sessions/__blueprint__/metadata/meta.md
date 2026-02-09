@@ -57,6 +57,7 @@ Feedback from Feature Sessions flows upward to inform Blueprint updates.
   Source Stages: context, intent
   Feedback Artifacts: idse-orchestrator::__blueprint__::feedback, idse-orchestrator::designstore-file-artifacts::feedback
   Evidence Hash: 91ecf19533a1788986addd301c46195dbcda779e5212ca12bafc8c7bb80807ca
+  Lifecycle: active
 - Date: 2026-02-08T04:50:57.556902
   Promoted Claim: SQLite is the authoritative storage backend for project artifacts.
   Classification: invariant
@@ -64,6 +65,7 @@ Feedback from Feature Sessions flows upward to inform Blueprint updates.
   Source Stages: feedback, spec
   Feedback Artifacts: idse-orchestrator::notion-designstore-refactor::feedback, idse-orchestrator::sqlite-cms-refactor::feedback
   Evidence Hash: 75f04365ac4539d9e02bd66fc1fdcfd59214bce6639377ce21b980256ee46ebc
+  Lifecycle: active
 - Date: 2026-02-08T04:29:31.463611
   Promoted Claim: SQLite is the default storage backend for project artifacts.
   Classification: invariant
@@ -71,6 +73,11 @@ Feedback from Feature Sessions flows upward to inform Blueprint updates.
   Source Stages: feedback, spec
   Feedback Artifacts: idse-orchestrator::notion-designstore-refactor::feedback, idse-orchestrator::sqlite-cms-refactor::feedback
   Evidence Hash: 4b6a41e196af071dfb1382af33bfa0e31de088e458d9200c6342840b77787d96
+  Lifecycle: active
+
+## Demotion Record
+
+- No demotion events recorded.
 
 ## Meta Narrative
 
@@ -82,4 +89,4 @@ Use this section for high-detail blueprint context that should survive metadata 
 <!-- END CUSTOM NARRATIVE -->
 
 ---
-*Last updated: 2026-02-08T05:07:58.870002*
+*Last updated: 2026-02-09T07:55:42.480445*

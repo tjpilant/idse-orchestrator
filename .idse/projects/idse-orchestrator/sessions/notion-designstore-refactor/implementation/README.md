@@ -204,3 +204,11 @@ Created: 2026-02-07T21:34:19.010190
 ## Constitution Amendments (2026-02-08)
 - Added Article XI covering Blueprint/Meta authority split, promotion gate requirements, SQLite source-of-truth, projection rules, active-session semantics, and promotion-record dedupe policy.
 - Added operational metadata SOP rules for active sessions, lineage rendering, and deduped promotion record presentation.
+
+
+## Governance Hardening Completion (Article XII)
+- Added integrity controls: `blueprint_integrity` + `integrity_events` tables, generator-side `verify_blueprint_integrity()`, and CLI `idse blueprint verify` with explicit `--accept` override.
+- Added claim lifecycle model: `blueprint_claims` + `claim_lifecycle_events` tables, active/superseded/invalidated transitions, and persisted demotion audit events (reason, actor, superseding claim).
+- Added demotion gate enforcement in `BlueprintPromotionGate.demote_claim()` and CLI lifecycle operations: `idse blueprint claims` and `idse blueprint demote`.
+- Updated blueprint projection semantics: canonical sections are rebuilt from active claims; append-only promoted ledger remains immutable history.
+- Updated `meta.md` generation to include lifecycle state on promotion records and a dedicated demotion record section.

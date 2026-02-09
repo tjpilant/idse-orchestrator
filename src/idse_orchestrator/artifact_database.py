@@ -1050,6 +1050,179 @@ class ArtifactDatabase:
                 results.append(item)
         return results
 
+    def save_blueprint_hash(self, project: str, file_hash: str) -> None:
+        project_id = self.ensure_project(project)
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO blueprint_integrity (project_id, file_hash, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(project_id)
+                DO UPDATE SET file_hash = excluded.file_hash, updated_at = excluded.updated_at;
+                """,
+                (project_id, file_hash, _now()),
+            )
+
+    def get_blueprint_hash(self, project: str) -> Optional[str]:
+        project_id = self.ensure_project(project)
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT file_hash
+                FROM blueprint_integrity
+                WHERE project_id = ?;
+                """,
+                (project_id,),
+            ).fetchone()
+        if not row:
+            return None
+        return str(row["file_hash"])
+
+    def record_integrity_event(
+        self,
+        project: str,
+        expected_hash: str,
+        actual_hash: str,
+        action: str = "warn",
+    ) -> None:
+        project_id = self.ensure_project(project)
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO integrity_events (
+                    project_id, expected_hash, actual_hash, action, created_at
+                ) VALUES (?, ?, ?, ?, ?);
+                """,
+                (project_id, expected_hash, actual_hash, action, _now()),
+            )
+
+    def save_blueprint_claim(
+        self,
+        project: str,
+        *,
+        claim_text: str,
+        classification: str,
+        promotion_record_id: int,
+        status: str = "active",
+        supersedes_claim_id: Optional[int] = None,
+    ) -> int:
+        project_id = self.ensure_project(project)
+        now = _now()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO blueprint_claims (
+                    project_id, claim_text, classification, status, supersedes_claim_id,
+                    promotion_record_id, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(project_id, claim_text)
+                DO UPDATE SET
+                    classification = excluded.classification,
+                    promotion_record_id = excluded.promotion_record_id,
+                    updated_at = excluded.updated_at;
+                """,
+                (
+                    project_id,
+                    claim_text,
+                    classification,
+                    status,
+                    supersedes_claim_id,
+                    promotion_record_id,
+                    now,
+                    now,
+                ),
+            )
+            row = conn.execute(
+                """
+                SELECT claim_id
+                FROM blueprint_claims
+                WHERE project_id = ? AND claim_text = ?;
+                """,
+                (project_id, claim_text),
+            ).fetchone()
+        return int(row["claim_id"])
+
+    def get_blueprint_claims(self, project: str, status: Optional[str] = None) -> list[Dict[str, Any]]:
+        project_id = self.ensure_project(project)
+        query = """
+            SELECT claim_id, project_id, claim_text, classification, status, supersedes_claim_id,
+                   promotion_record_id, created_at, updated_at
+            FROM blueprint_claims
+            WHERE project_id = ?
+        """
+        params: list[Any] = [project_id]
+        if status:
+            query += " AND status = ?"
+            params.append(status)
+        query += " ORDER BY created_at;"
+        with self._connect() as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [dict(row) for row in rows]
+
+    def update_claim_status(
+        self,
+        claim_id: int,
+        status: str,
+        supersedes_claim_id: Optional[int] = None,
+    ) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE blueprint_claims
+                SET status = ?, supersedes_claim_id = ?, updated_at = ?
+                WHERE claim_id = ?;
+                """,
+                (status, supersedes_claim_id, _now(), claim_id),
+            )
+
+    def record_lifecycle_event(
+        self,
+        claim_id: int,
+        project: str,
+        old_status: str,
+        new_status: str,
+        reason: str,
+        actor: str = "system",
+        superseding_claim_id: Optional[int] = None,
+    ) -> None:
+        project_id = self.ensure_project(project)
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO claim_lifecycle_events (
+                    claim_id, project_id, old_status, new_status, reason, actor, superseding_claim_id, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+                """,
+                (
+                    claim_id,
+                    project_id,
+                    old_status,
+                    new_status,
+                    reason,
+                    actor,
+                    superseding_claim_id,
+                    _now(),
+                ),
+            )
+
+    def get_lifecycle_events(self, project: str, claim_id: Optional[int] = None) -> list[Dict[str, Any]]:
+        project_id = self.ensure_project(project)
+        query = """
+            SELECT e.id, e.claim_id, e.project_id, c.claim_text, e.old_status, e.new_status,
+                   e.reason, e.actor, e.superseding_claim_id, e.created_at
+            FROM claim_lifecycle_events e
+            JOIN blueprint_claims c ON e.claim_id = c.claim_id
+            WHERE e.project_id = ?
+        """
+        params: list[Any] = [project_id]
+        if claim_id is not None:
+            query += " AND e.claim_id = ?"
+            params.append(claim_id)
+        query += " ORDER BY e.created_at DESC;"
+        with self._connect() as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [dict(row) for row in rows]
+
 
 def _now() -> str:
     return datetime.now().isoformat()
@@ -1303,6 +1476,59 @@ def _schema_statements() -> Iterable[str]:
             promoted_at TEXT,
             FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
             FOREIGN KEY(candidate_id) REFERENCES promotion_candidates(id) ON DELETE CASCADE
+        );
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS blueprint_integrity (
+            id INTEGER PRIMARY KEY,
+            project_id INTEGER NOT NULL UNIQUE,
+            file_hash TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS integrity_events (
+            id INTEGER PRIMARY KEY,
+            project_id INTEGER NOT NULL,
+            expected_hash TEXT NOT NULL,
+            actual_hash TEXT NOT NULL,
+            action TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS blueprint_claims (
+            claim_id INTEGER PRIMARY KEY,
+            project_id INTEGER NOT NULL,
+            claim_text TEXT NOT NULL,
+            classification TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active',
+            supersedes_claim_id INTEGER,
+            promotion_record_id INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(project_id, claim_text),
+            FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
+            FOREIGN KEY(supersedes_claim_id) REFERENCES blueprint_claims(claim_id),
+            FOREIGN KEY(promotion_record_id) REFERENCES promotion_records(id) ON DELETE CASCADE
+        );
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS claim_lifecycle_events (
+            id INTEGER PRIMARY KEY,
+            claim_id INTEGER NOT NULL,
+            project_id INTEGER NOT NULL,
+            old_status TEXT NOT NULL,
+            new_status TEXT NOT NULL,
+            reason TEXT NOT NULL,
+            actor TEXT NOT NULL DEFAULT 'system',
+            superseding_claim_id INTEGER,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(claim_id) REFERENCES blueprint_claims(claim_id) ON DELETE CASCADE,
+            FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
+            FOREIGN KEY(superseding_claim_id) REFERENCES blueprint_claims(claim_id)
         );
         """,
         """

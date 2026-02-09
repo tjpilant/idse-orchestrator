@@ -571,3 +571,91 @@ def test_cli_blueprint_extract_candidates(tmp_path):
         assert "Extracted" in result.output
         assert "authoritative storage backend" in result.output
         assert "Gate: ALLOW" in result.output
+
+
+def test_cli_blueprint_verify_accepts_mismatch(tmp_path):
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        idse_root = Path(".") / ".idse"
+        project = "demo"
+        (idse_root / "projects" / project / "sessions" / "__blueprint__" / "metadata").mkdir(
+            parents=True, exist_ok=True
+        )
+        (idse_root / "projects" / project / "CURRENT_SESSION").write_text("__blueprint__")
+
+        from idse_orchestrator.artifact_database import ArtifactDatabase
+        from idse_orchestrator.file_view_generator import FileViewGenerator
+
+        db = ArtifactDatabase(idse_root=idse_root)
+        db.ensure_session(project, "__blueprint__", is_blueprint=True, session_type="blueprint", status="draft")
+        generator = FileViewGenerator(idse_root=idse_root)
+        scope = generator.ensure_blueprint_scope(project)
+        db.save_blueprint_hash(project, "expected")
+        scope.write_text(scope.read_text() + "\nmanual edit\n")
+
+        fail = runner.invoke(main, ["blueprint", "verify", "--project", project])
+        assert fail.exit_code == 1
+
+        ok = runner.invoke(main, ["blueprint", "verify", "--project", project, "--accept"])
+        assert ok.exit_code == 0
+        assert "Accepted current blueprint content" in ok.output
+
+
+def test_cli_blueprint_demote_and_claims(tmp_path):
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        idse_root = Path(".") / ".idse"
+        project = "demo"
+        (idse_root / "projects" / project / "sessions" / "__blueprint__" / "metadata").mkdir(
+            parents=True, exist_ok=True
+        )
+        (idse_root / "projects" / project / "CURRENT_SESSION").write_text("__blueprint__")
+
+        from idse_orchestrator.artifact_database import ArtifactDatabase
+        from idse_orchestrator.file_view_generator import FileViewGenerator
+
+        db = ArtifactDatabase(idse_root=idse_root)
+        db.ensure_session(project, "__blueprint__", is_blueprint=True, session_type="blueprint", status="draft")
+        candidate_id = db.save_promotion_candidate(
+            project,
+            claim_text="SQLite is authoritative.",
+            classification="invariant",
+            evidence_hash="seed-hash",
+            failed_tests=[],
+            evidence={},
+            source_artifact_ids=[],
+        )
+        promotion_record_id = db.save_promotion_record(
+            project,
+            candidate_id=candidate_id,
+            status="ALLOW",
+            promoted_claim="SQLite is authoritative.",
+            evidence_hash="seed-hash",
+        )
+        claim_id = db.save_blueprint_claim(
+            project,
+            claim_text="SQLite is authoritative.",
+            classification="invariant",
+            promotion_record_id=promotion_record_id,
+        )
+        FileViewGenerator(idse_root=idse_root).apply_allowed_promotions_to_blueprint(project)
+
+        claims_out = runner.invoke(main, ["blueprint", "claims", "--project", project])
+        assert claims_out.exit_code == 0
+        assert "SQLite is authoritative." in claims_out.output
+
+        demote = runner.invoke(
+            main,
+            [
+                "blueprint",
+                "demote",
+                "--project",
+                project,
+                "--claim-id",
+                str(claim_id),
+                "--reason",
+                "test reason",
+            ],
+        )
+        assert demote.exit_code == 0
+        assert "Demoted claim" in demote.output

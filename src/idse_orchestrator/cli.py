@@ -1290,6 +1290,142 @@ def blueprint_extract_candidates(
                 summary += f" failed={','.join(decision.failed_tests)}"
             click.echo(f"   Gate: {summary}")
 
+
+@blueprint.command("verify")
+@click.option("--project", help="Project name (uses current if not specified)")
+@click.option("--accept", is_flag=True, help="Accept current blueprint file as authoritative hash.")
+def blueprint_verify(project: Optional[str], accept: bool):
+    """Verify blueprint.md integrity against stored authoritative hash."""
+    from .artifact_database import ArtifactDatabase, hash_content
+    from .file_view_generator import FileViewGenerator
+    from .project_workspace import ProjectWorkspace
+
+    manager = ProjectWorkspace()
+    if project:
+        project_path = manager.projects_root / project
+    else:
+        project_path = manager.get_current_project()
+        if not project_path:
+            click.echo("❌ Error: No IDSE project found", err=True)
+            sys.exit(1)
+        project = project_path.name
+
+    generator = FileViewGenerator(idse_root=manager.idse_root, allow_create=False)
+    warning_msg = generator.verify_blueprint_integrity(project)
+    if warning_msg is None:
+        click.echo("✅ Blueprint integrity OK")
+        return
+
+    click.echo(f"⚠️  {warning_msg}")
+    if not accept:
+        sys.exit(1)
+
+    scope = generator.ensure_blueprint_scope(project)
+    db = ArtifactDatabase(idse_root=manager.idse_root, allow_create=False)
+    expected_hash = db.get_blueprint_hash(project) or ""
+    actual_hash = hash_content(scope.read_text())
+    db.record_integrity_event(project, expected_hash, actual_hash, "accept")
+    db.save_blueprint_hash(project, actual_hash)
+    click.echo("✅ Accepted current blueprint content and updated authoritative hash")
+
+
+@blueprint.command("claims")
+@click.option("--project", help="Project name (uses current if not specified)")
+@click.option("--status", help="Optional status filter (active, superseded, invalidated)")
+@click.option("--all", "show_all", is_flag=True, help="Show all claims (same as omitting --status).")
+def blueprint_claims(project: Optional[str], status: Optional[str], show_all: bool):
+    """List blueprint claims and lifecycle status."""
+    from .artifact_database import ArtifactDatabase
+    from .project_workspace import ProjectWorkspace
+
+    manager = ProjectWorkspace()
+    if project:
+        project_path = manager.projects_root / project
+    else:
+        project_path = manager.get_current_project()
+        if not project_path:
+            click.echo("❌ Error: No IDSE project found", err=True)
+            sys.exit(1)
+        project = project_path.name
+
+    if status and status not in {"active", "superseded", "invalidated"}:
+        click.echo("❌ Error: --status must be one of active|superseded|invalidated", err=True)
+        sys.exit(1)
+    filter_status = None if show_all else status
+
+    db = ArtifactDatabase(idse_root=manager.idse_root, allow_create=False)
+    claims = db.get_blueprint_claims(project, status=filter_status)
+    if not claims:
+        click.echo("No blueprint claims found.")
+        return
+    for claim in claims:
+        click.echo(
+            f"{claim['claim_id']}: [{claim['classification']}] {claim['status']} | "
+            f"{claim['claim_text']} | created={claim['created_at']}"
+        )
+
+
+@blueprint.command("demote")
+@click.option("--project", help="Project name (uses current if not specified)")
+@click.option("--claim-id", required=True, type=int, help="Claim ID to demote")
+@click.option("--reason", required=True, help="Evidence-based reason for demotion")
+@click.option(
+    "--status",
+    "new_status",
+    default="invalidated",
+    show_default=True,
+    type=click.Choice(["superseded", "invalidated"], case_sensitive=False),
+    help="Lifecycle status to apply",
+)
+@click.option("--superseding-claim-id", type=int, help="Required when --status superseded")
+@click.option("--actor", default="operator", show_default=True, help="Actor performing demotion")
+def blueprint_demote(
+    project: Optional[str],
+    claim_id: int,
+    reason: str,
+    new_status: str,
+    superseding_claim_id: Optional[int],
+    actor: str,
+):
+    """Demote a blueprint claim via lifecycle gate checks."""
+    from .artifact_database import ArtifactDatabase
+    from .blueprint_promotion import BlueprintPromotionGate
+    from .file_view_generator import FileViewGenerator
+    from .project_workspace import ProjectWorkspace
+
+    manager = ProjectWorkspace()
+    if project:
+        project_path = manager.projects_root / project
+    else:
+        project_path = manager.get_current_project()
+        if not project_path:
+            click.echo("❌ Error: No IDSE project found", err=True)
+            sys.exit(1)
+        project = project_path.name
+
+    db = ArtifactDatabase(idse_root=manager.idse_root, allow_create=False)
+    gate = BlueprintPromotionGate(db)
+    try:
+        result = gate.demote_claim(
+            project,
+            claim_id=claim_id,
+            reason=reason,
+            new_status=new_status.lower(),
+            actor=actor,
+            superseding_claim_id=superseding_claim_id,
+        )
+    except ValueError as exc:
+        click.echo(f"❌ Error: {exc}", err=True)
+        sys.exit(1)
+
+    generator = FileViewGenerator(idse_root=manager.idse_root, allow_create=False)
+    generator.apply_allowed_promotions_to_blueprint(project)
+    generator.generate_blueprint_meta(project)
+
+    click.echo(
+        f"✅ Demoted claim {result['claim_id']} ({result['old_status']} -> {result['new_status']})"
+    )
+
 @docs.command("install")
 @click.option("--force", is_flag=True, help="Overwrite existing docs/templates")
 @click.pass_context
