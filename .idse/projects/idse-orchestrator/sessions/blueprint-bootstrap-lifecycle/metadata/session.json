@@ -1,0 +1,15 @@
+{
+  "session_id": "blueprint-bootstrap-lifecycle",
+  "name": "blueprint-bootstrap-lifecycle",
+  "session_type": "feature",
+  "description": null,
+  "is_blueprint": false,
+  "parent_session": "__blueprint__",
+  "related_sessions": [],
+  "owner": "system",
+  "collaborators": [],
+  "tags": [],
+  "status": "complete",
+  "created_at": "2026-02-10T11:07:49.186947",
+  "updated_at": "2026-02-10T12:07:34.619536"
+}

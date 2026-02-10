@@ -211,6 +211,20 @@ class ArtifactDatabase:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def get_session_metadata(self, project: str, session_id: str) -> Optional[Dict[str, Any]]:
+        project_id = self.ensure_project(project)
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT session_id, name, session_type, description, is_blueprint, parent_session,
+                       owner, status, created_at, updated_at
+                FROM sessions
+                WHERE project_id = ? AND session_id = ?;
+                """,
+                (project_id, session_id),
+            ).fetchone()
+        return dict(row) if row else None
+
     def save_artifact(self, project: str, session_id: str, stage: str, content: str) -> ArtifactRecord:
         project_id = self.ensure_project(project)
         session_row_id = self.ensure_session(project, session_id)
@@ -1102,7 +1116,8 @@ class ArtifactDatabase:
         *,
         claim_text: str,
         classification: str,
-        promotion_record_id: int,
+        promotion_record_id: Optional[int],
+        origin: str = "converged",
         status: str = "active",
         supersedes_claim_id: Optional[int] = None,
     ) -> int:
@@ -1113,12 +1128,15 @@ class ArtifactDatabase:
                 """
                 INSERT INTO blueprint_claims (
                     project_id, claim_text, classification, status, supersedes_claim_id,
-                    promotion_record_id, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    promotion_record_id, origin, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(project_id, claim_text)
                 DO UPDATE SET
                     classification = excluded.classification,
+                    status = excluded.status,
+                    supersedes_claim_id = excluded.supersedes_claim_id,
                     promotion_record_id = excluded.promotion_record_id,
+                    origin = excluded.origin,
                     updated_at = excluded.updated_at;
                 """,
                 (
@@ -1128,6 +1146,7 @@ class ArtifactDatabase:
                     status,
                     supersedes_claim_id,
                     promotion_record_id,
+                    origin,
                     now,
                     now,
                 ),
@@ -1146,7 +1165,7 @@ class ArtifactDatabase:
         project_id = self.ensure_project(project)
         query = """
             SELECT claim_id, project_id, claim_text, classification, status, supersedes_claim_id,
-                   promotion_record_id, created_at, updated_at
+                   promotion_record_id, origin, created_at, updated_at
             FROM blueprint_claims
             WHERE project_id = ?
         """
@@ -1284,6 +1303,30 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
             WHERE semantic_fingerprint IS NULL;
             """
         )
+    cursor = conn.execute(
+        """
+        SELECT name
+        FROM sqlite_master
+        WHERE type='table' AND name='blueprint_claims';
+        """
+    )
+    if cursor.fetchone():
+        cursor = conn.execute("PRAGMA table_info(blueprint_claims);")
+        claim_columns = {row[1]: row for row in cursor.fetchall()}
+        if "origin" not in claim_columns:
+            conn.execute(
+                "ALTER TABLE blueprint_claims ADD COLUMN origin TEXT NOT NULL DEFAULT 'converged';"
+            )
+        conn.execute(
+            """
+            UPDATE blueprint_claims
+            SET origin = 'converged'
+            WHERE origin IS NULL OR TRIM(origin) = '';
+            """
+        )
+        promotion_record_col = claim_columns.get("promotion_record_id")
+        if promotion_record_col and int(promotion_record_col[3]) == 1:
+            _migrate_blueprint_claims_nullable_promotion_record(conn)
 
 
 def _schema_statements() -> Iterable[str]:
@@ -1506,7 +1549,8 @@ def _schema_statements() -> Iterable[str]:
             classification TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT 'active',
             supersedes_claim_id INTEGER,
-            promotion_record_id INTEGER NOT NULL,
+            promotion_record_id INTEGER,
+            origin TEXT NOT NULL DEFAULT 'converged',
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             UNIQUE(project_id, claim_text),
@@ -1557,3 +1601,42 @@ def _schema_statements() -> Iterable[str]:
         );
         """,
     ]
+
+
+def _migrate_blueprint_claims_nullable_promotion_record(conn: sqlite3.Connection) -> None:
+    conn.execute("PRAGMA foreign_keys = OFF;")
+    conn.execute("ALTER TABLE blueprint_claims RENAME TO blueprint_claims_legacy;")
+    conn.execute(
+        """
+        CREATE TABLE blueprint_claims (
+            claim_id INTEGER PRIMARY KEY,
+            project_id INTEGER NOT NULL,
+            claim_text TEXT NOT NULL,
+            classification TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active',
+            supersedes_claim_id INTEGER,
+            promotion_record_id INTEGER,
+            origin TEXT NOT NULL DEFAULT 'converged',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(project_id, claim_text),
+            FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
+            FOREIGN KEY(supersedes_claim_id) REFERENCES blueprint_claims(claim_id),
+            FOREIGN KEY(promotion_record_id) REFERENCES promotion_records(id) ON DELETE CASCADE
+        );
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO blueprint_claims (
+            claim_id, project_id, claim_text, classification, status, supersedes_claim_id,
+            promotion_record_id, origin, created_at, updated_at
+        )
+        SELECT
+            claim_id, project_id, claim_text, classification, status, supersedes_claim_id,
+            promotion_record_id, COALESCE(NULLIF(origin, ''), 'converged'), created_at, updated_at
+        FROM blueprint_claims_legacy;
+        """
+    )
+    conn.execute("DROP TABLE blueprint_claims_legacy;")
+    conn.execute("PRAGMA foreign_keys = ON;")

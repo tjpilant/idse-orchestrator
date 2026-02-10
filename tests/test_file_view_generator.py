@@ -546,6 +546,91 @@ def test_apply_allowed_promotions_projects_claim_into_purpose_section(tmp_path: 
     assert "## Purpose" in blueprint
     assert "- IDSE Orchestrator is the design-time Documentation OS for project intent and delivery." in blueprint
     assert (
-        "- [non_negotiable_constraint] IDSE Orchestrator is the design-time Documentation OS for project intent and delivery."
+        "- [non_negotiable_constraint|converged] IDSE Orchestrator is the design-time Documentation OS for project intent and delivery."
         in blueprint
     )
+
+
+def test_blueprint_meta_excludes_archived_sessions(tmp_path: Path) -> None:
+    idse_root = tmp_path / ".idse"
+    db = ArtifactDatabase(idse_root=idse_root)
+    project = "demo"
+
+    db.ensure_session(
+        project,
+        "__blueprint__",
+        name="__blueprint__",
+        session_type="blueprint",
+        is_blueprint=True,
+        status="draft",
+    )
+    db.ensure_session(
+        project,
+        "feature-archived",
+        name="feature-archived",
+        session_type="feature",
+        is_blueprint=False,
+        parent_session="__blueprint__",
+        status="archived",
+    )
+    db.save_artifact(
+        project,
+        "feature-archived",
+        "implementation",
+        """# Implementation Readme
+## Summary
+- This content should not appear.
+""",
+    )
+
+    generator = FileViewGenerator(idse_root=idse_root)
+    meta_path = generator.generate_blueprint_meta(project)
+    meta_content = meta_path.read_text()
+
+    # The session should NOT be in the Delivery Summary
+    if "## Delivery Summary" in meta_content:
+        summary_section = meta_content.split("## Delivery Summary", 1)[1]
+        assert "`feature-archived`" not in summary_section
+        assert "This content should not appear" not in summary_section
+
+def test_blueprint_meta_excludes_archived_sessions(tmp_path: Path) -> None:
+    idse_root = tmp_path / ".idse"
+    db = ArtifactDatabase(idse_root=idse_root)
+    project = "demo"
+
+    db.ensure_session(
+        project,
+        "__blueprint__",
+        name="__blueprint__",
+        session_type="blueprint",
+        is_blueprint=True,
+        status="draft",
+    )
+    db.ensure_session(
+        project,
+        "feature-archived",
+        name="feature-archived",
+        session_type="feature",
+        is_blueprint=False,
+        parent_session="__blueprint__",
+        status="archived",
+    )
+    db.save_artifact(
+        project,
+        "feature-archived",
+        "implementation",
+        """# Implementation Readme
+## Summary
+- This content should not appear.
+""",
+    )
+
+    generator = FileViewGenerator(idse_root=idse_root)
+    meta_path = generator.generate_blueprint_meta(project)
+    meta_content = meta_path.read_text()
+
+    # The session should NOT be in the Delivery Summary
+    if "## Delivery Summary" in meta_content:
+        summary_section = meta_content.split("## Delivery Summary", 1)[1]
+        assert "`feature-archived`" not in summary_section
+        assert "This content should not appear" not in summary_section

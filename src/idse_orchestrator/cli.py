@@ -1180,6 +1180,157 @@ def blueprint_promote(
         click.echo("✅ Blueprint artifacts regenerated")
 
 
+@blueprint.command("declare")
+@click.option("--project", help="Project name (uses current if not specified)")
+@click.option("--claim", "claim_text", required=True, help="Founding claim text to declare")
+@click.option(
+    "--classification",
+    required=True,
+    type=click.Choice(
+        ["invariant", "boundary", "ownership_rule", "non_negotiable_constraint"],
+        case_sensitive=False,
+    ),
+    help="Constitutional class for the claim",
+)
+@click.option(
+    "--source",
+    "sources",
+    multiple=True,
+    required=True,
+    help="Artifact reference in session:stage format (repeatable)",
+)
+@click.option("--actor", default="architect", show_default=True, help="Actor performing declaration")
+def blueprint_declare(
+    project: Optional[str],
+    claim_text: str,
+    classification: str,
+    sources: tuple[str, ...],
+    actor: str,
+):
+    """Declare a founding blueprint claim without convergence-gate requirements."""
+    from .artifact_database import ArtifactDatabase
+    from .blueprint_promotion import BlueprintPromotionGate
+    from .file_view_generator import FileViewGenerator
+    from .project_workspace import ProjectWorkspace
+
+    manager = ProjectWorkspace()
+    if project:
+        project_path = manager.projects_root / project
+    else:
+        project_path = manager.get_current_project()
+        if not project_path:
+            click.echo("❌ Error: No IDSE project found", err=True)
+            sys.exit(1)
+        project = project_path.name
+
+    parsed_sources: list[tuple[str, str]] = []
+    for source in sources:
+        if ":" not in source:
+            click.echo(f"❌ Error: Invalid --source '{source}'. Expected session:stage.", err=True)
+            sys.exit(1)
+        session_id, stage = source.split(":", 1)
+        parsed_sources.append((session_id.strip(), stage.strip()))
+
+    source_sessions = {session_id for session_id, _ in parsed_sources}
+    if len(source_sessions) != 1:
+        click.echo("❌ Error: All --source values must share the same session.", err=True)
+        sys.exit(1)
+    source_session = parsed_sources[0][0]
+
+    db = ArtifactDatabase(idse_root=manager.idse_root, allow_create=False)
+    for session_id, stage in parsed_sources:
+        if db.get_artifact_id(project, session_id, stage) is None:
+            click.echo(
+                f"❌ Error: source artifact not found for {project}/{session_id}:{stage}.",
+                err=True,
+            )
+            sys.exit(1)
+
+    gate = BlueprintPromotionGate(db)
+    try:
+        result = gate.declare_claim(
+            project,
+            claim_text=claim_text,
+            classification=classification.lower(),
+            source_session=source_session,
+            source_stages=[stage for _, stage in parsed_sources],
+            actor=actor,
+        )
+    except ValueError as exc:
+        click.echo(f"❌ Error: {exc}", err=True)
+        sys.exit(1)
+
+    generator = FileViewGenerator(idse_root=manager.idse_root, allow_create=False)
+    generator.apply_allowed_promotions_to_blueprint(project)
+    generator.generate_blueprint_meta(project)
+    click.echo(
+        f"✅ Declared claim {result['claim_id']} [{classification.lower()}|{result['origin']}]"
+    )
+
+
+@blueprint.command("reinforce")
+@click.option("--project", help="Project name (uses current if not specified)")
+@click.option("--claim-id", required=True, type=int, help="Claim ID to reinforce")
+@click.option(
+    "--source",
+    required=True,
+    help="Artifact reference in session:stage format",
+)
+@click.option("--actor", default="system", show_default=True, help="Actor recording reinforcement")
+def blueprint_reinforce(
+    project: Optional[str],
+    claim_id: int,
+    source: str,
+    actor: str,
+):
+    """Record reinforcement evidence for an active claim without changing claim status."""
+    from .artifact_database import ArtifactDatabase
+    from .blueprint_promotion import BlueprintPromotionGate
+    from .file_view_generator import FileViewGenerator
+    from .project_workspace import ProjectWorkspace
+
+    manager = ProjectWorkspace()
+    if project:
+        project_path = manager.projects_root / project
+    else:
+        project_path = manager.get_current_project()
+        if not project_path:
+            click.echo("❌ Error: No IDSE project found", err=True)
+            sys.exit(1)
+        project = project_path.name
+
+    if ":" not in source:
+        click.echo(f"❌ Error: Invalid --source '{source}'. Expected session:stage.", err=True)
+        sys.exit(1)
+    session_id, stage = source.split(":", 1)
+    session_id = session_id.strip()
+    stage = stage.strip()
+
+    db = ArtifactDatabase(idse_root=manager.idse_root, allow_create=False)
+    if db.get_artifact_id(project, session_id, stage) is None:
+        click.echo(
+            f"❌ Error: source artifact not found for {project}/{session_id}:{stage}.",
+            err=True,
+        )
+        sys.exit(1)
+
+    gate = BlueprintPromotionGate(db)
+    try:
+        result = gate.reinforce_claim(
+            project,
+            claim_id=claim_id,
+            reinforcing_session=session_id,
+            reinforcing_stage=stage,
+            actor=actor,
+        )
+    except ValueError as exc:
+        click.echo(f"❌ Error: {exc}", err=True)
+        sys.exit(1)
+
+    FileViewGenerator(idse_root=manager.idse_root, allow_create=False).generate_blueprint_meta(project)
+    click.echo(f"✅ Reinforced claim {result['claim_id']}")
+
+
 @blueprint.command("extract-candidates")
 @click.option("--project", help="Project name (uses current if not specified)")
 @click.option(

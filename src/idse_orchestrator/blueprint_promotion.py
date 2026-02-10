@@ -164,6 +164,82 @@ class BlueprintPromotionGate:
         )
         return decision
 
+    def declare_claim(
+        self,
+        project: str,
+        *,
+        claim_text: str,
+        classification: str,
+        source_session: str,
+        source_stages: List[str],
+        actor: str = "architect",
+    ) -> Dict[str, Any]:
+        if source_session != "__blueprint__":
+            raise ValueError("Declared claims must originate from __blueprint__.")
+        if classification not in CONSTITUTIONAL_CLASSES:
+            raise ValueError(f"Invalid constitutional classification: {classification}")
+        normalized_claim = claim_text.strip()
+        if not normalized_claim:
+            raise ValueError("Claim text is required.")
+        normalized_stages = [stage.strip() for stage in source_stages if stage and stage.strip()]
+        if not normalized_stages:
+            raise ValueError("At least one source stage is required.")
+
+        active_claims = self.db.get_blueprint_claims(project, status="active")
+        if any(item["claim_text"] == normalized_claim for item in active_claims):
+            raise ValueError("Duplicate active claim.")
+
+        claim_id = self.db.save_blueprint_claim(
+            project,
+            claim_text=normalized_claim,
+            classification=classification,
+            promotion_record_id=None,
+            origin="declared",
+            status="active",
+        )
+        self.db.record_lifecycle_event(
+            claim_id,
+            project,
+            "",
+            "active",
+            "Founding declaration from blueprint pipeline",
+            actor=actor,
+        )
+        return {"claim_id": int(claim_id), "status": "active", "origin": "declared"}
+
+    def reinforce_claim(
+        self,
+        project: str,
+        *,
+        claim_id: int,
+        reinforcing_session: str,
+        reinforcing_stage: str,
+        actor: str = "system",
+    ) -> Dict[str, Any]:
+        claims = self.db.get_blueprint_claims(project)
+        claim = next((item for item in claims if int(item["claim_id"]) == int(claim_id)), None)
+        if claim is None:
+            raise ValueError(f"Claim {claim_id} not found.")
+        if claim["status"] != "active":
+            raise ValueError(
+                f"Claim {claim_id} is '{claim['status']}', only active claims can be reinforced."
+            )
+
+        source = f"{reinforcing_session.strip()}:{reinforcing_stage.strip()}"
+        self.db.record_lifecycle_event(
+            int(claim_id),
+            project,
+            "active",
+            "active",
+            f"Reinforced by {source}",
+            actor=actor,
+        )
+        return {
+            "claim_id": int(claim_id),
+            "event": "reinforced",
+            "status": "active",
+        }
+
     def demote_claim(
         self,
         project: str,

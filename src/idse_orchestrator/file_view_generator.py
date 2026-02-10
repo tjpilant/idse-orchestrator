@@ -227,16 +227,9 @@ Feedback from Feature Sessions flows upward to inform Blueprint updates.
             return path
 
         rows = self.db.list_blueprint_promotions(project, status="ALLOW")
-        claims = [f"- [{row['classification']}] {row['claim_text']}" for row in rows]
-        if not claims:
+        if not rows and not self.db.get_blueprint_claims(project, status="active"):
             return path
 
-        rebuilt = _append_unique_bullets_to_section(
-            content,
-            marker,
-            claims,
-            placeholder="- No converged intent promoted yet.",
-        )
         existing_claims = self.db.get_blueprint_claims(project)
         existing_claim_texts = {claim["claim_text"] for claim in existing_claims}
         for row in rows:
@@ -246,7 +239,18 @@ Feedback from Feature Sessions flows upward to inform Blueprint updates.
                     claim_text=row["claim_text"],
                     classification=row["classification"],
                     promotion_record_id=row["id"],
+                    origin="converged",
                 )
+        claims = [
+            f"- [{claim['classification']}|{claim.get('origin', 'converged')}] {claim['claim_text']}"
+            for claim in self.db.get_blueprint_claims(project, status="active")
+        ]
+        rebuilt = _append_unique_bullets_to_section(
+            content,
+            marker,
+            claims,
+            placeholder="- No converged intent promoted yet.",
+        )
         active_claim_texts = {
             claim["claim_text"] for claim in self.db.get_blueprint_claims(project, status="active")
         }
@@ -331,11 +335,32 @@ Feedback from Feature Sessions flows upward to inform Blueprint updates.
                     f"- Date: {row.get('promoted_at') or row.get('created_at')}",
                     f"  Promoted Claim: {row['claim_text']}",
                     f"  Classification: {row['classification']}",
+                    f"  Origin: {all_claims.get(row['claim_text'], {}).get('origin', 'converged')}",
                     f"  Source Sessions: {', '.join(sessions) if sessions else 'none'}",
                     f"  Source Stages: {', '.join(stages) if stages else 'none'}",
                     f"  Feedback Artifacts: {', '.join(feedback_ids) if feedback_ids else 'none'}",
                     f"  Evidence Hash: {row['evidence_hash']}",
                     f"  Lifecycle: {all_claims.get(row['claim_text'], {}).get('status', 'unknown')}",
+                ]
+            )
+        declared_claims = [
+            claim for claim in self.db.get_blueprint_claims(project) if claim.get("origin") == "declared"
+        ]
+        promoted_claim_texts = {row["claim_text"] for row in ordered_rows}
+        for claim in declared_claims:
+            if claim["claim_text"] in promoted_claim_texts:
+                continue
+            lines.extend(
+                [
+                    f"- Date: {claim['created_at']}",
+                    f"  Promoted Claim: {claim['claim_text']}",
+                    f"  Classification: {claim['classification']}",
+                    "  Origin: declared",
+                    "  Source Sessions: __blueprint__",
+                    "  Source Stages: n/a",
+                    "  Feedback Artifacts: none",
+                    "  Evidence Hash: n/a",
+                    f"  Lifecycle: {claim.get('status', 'unknown')}",
                 ]
             )
         return "\n".join(lines)
@@ -498,6 +523,14 @@ Feedback from Feature Sessions flows upward to inform Blueprint updates.
         return []
 
     def _session_is_reportable(self, project: str, session_id: str) -> bool:
+        # Skip archived sessions from rollups
+        try:
+            meta = self.db.get_session_metadata(project, session_id)
+            if meta and meta.get("status") == "archived":
+                return False
+        except Exception:
+            pass
+
         # Exclude sessions with no meaningful artifact content. This prevents
         # placeholders/empty sessions from polluting high-level rollups.
         found_meaningful = False

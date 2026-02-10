@@ -150,7 +150,7 @@ def test_demoted_claim_excluded_from_canonical_but_kept_in_ledger(tmp_path: Path
 
     core_section = content.split("## Core Invariants", 1)[1].split("## High-Level Architecture", 1)[0]
     assert "SQLite is the authoritative storage backend for project artifacts." not in core_section
-    assert "- [invariant] SQLite is the authoritative storage backend for project artifacts." in content
+    assert "- [invariant|converged] SQLite is the authoritative storage backend for project artifacts." in content
 
 
 def test_demote_requires_reason(tmp_path: Path) -> None:
@@ -240,3 +240,230 @@ def test_meta_shows_lifecycle_and_demotion_records(tmp_path: Path) -> None:
     assert "## Demotion Record" in meta
     assert "Reason: Evidence changed" in meta
     assert "Actor: tester" in meta
+
+
+def test_declare_claim_creates_active_declared_claim(tmp_path: Path) -> None:
+    db = ArtifactDatabase(idse_root=tmp_path / ".idse")
+    gate = BlueprintPromotionGate(db)
+    project = "demo"
+    db.save_artifact(project, "__blueprint__", "intent", "Founding intent.")
+
+    result = gate.declare_claim(
+        project,
+        claim_text="SQLite is the authoritative storage backend.",
+        classification="invariant",
+        source_session="__blueprint__",
+        source_stages=["intent"],
+    )
+
+    claims = db.get_blueprint_claims(project)
+    assert result["status"] == "active"
+    assert result["origin"] == "declared"
+    assert len(claims) == 1
+    assert claims[0]["origin"] == "declared"
+    assert claims[0]["status"] == "active"
+
+
+def test_declare_claim_rejects_non_blueprint_session(tmp_path: Path) -> None:
+    db = ArtifactDatabase(idse_root=tmp_path / ".idse")
+    gate = BlueprintPromotionGate(db)
+
+    with pytest.raises(ValueError, match="__blueprint__"):
+        gate.declare_claim(
+            "demo",
+            claim_text="A claim",
+            classification="invariant",
+            source_session="feature-1",
+            source_stages=["intent"],
+        )
+
+
+def test_declare_claim_rejects_duplicate_active_claim(tmp_path: Path) -> None:
+    db = ArtifactDatabase(idse_root=tmp_path / ".idse")
+    gate = BlueprintPromotionGate(db)
+    project = "demo"
+    db.save_artifact(project, "__blueprint__", "intent", "Founding intent.")
+
+    gate.declare_claim(
+        project,
+        claim_text="A claim",
+        classification="invariant",
+        source_session="__blueprint__",
+        source_stages=["intent"],
+    )
+    with pytest.raises(ValueError, match="Duplicate active claim"):
+        gate.declare_claim(
+            project,
+            claim_text="A claim",
+            classification="invariant",
+            source_session="__blueprint__",
+            source_stages=["intent"],
+        )
+
+
+def test_declare_claim_records_lifecycle_event(tmp_path: Path) -> None:
+    db = ArtifactDatabase(idse_root=tmp_path / ".idse")
+    gate = BlueprintPromotionGate(db)
+    project = "demo"
+    db.save_artifact(project, "__blueprint__", "intent", "Founding intent.")
+    result = gate.declare_claim(
+        project,
+        claim_text="A claim",
+        classification="invariant",
+        source_session="__blueprint__",
+        source_stages=["intent"],
+        actor="architect",
+    )
+
+    events = db.get_lifecycle_events(project, claim_id=result["claim_id"])
+    assert len(events) == 1
+    assert events[0]["old_status"] == ""
+    assert events[0]["new_status"] == "active"
+    assert events[0]["reason"] == "Founding declaration from blueprint pipeline"
+    assert events[0]["actor"] == "architect"
+
+
+def test_declare_claim_has_no_promotion_record(tmp_path: Path) -> None:
+    db = ArtifactDatabase(idse_root=tmp_path / ".idse")
+    gate = BlueprintPromotionGate(db)
+    project = "demo"
+    db.save_artifact(project, "__blueprint__", "intent", "Founding intent.")
+
+    result = gate.declare_claim(
+        project,
+        claim_text="A claim",
+        classification="invariant",
+        source_session="__blueprint__",
+        source_stages=["intent"],
+    )
+
+    claim = db.get_blueprint_claims(project, status="active")[0]
+    assert claim["claim_id"] == result["claim_id"]
+    assert claim["promotion_record_id"] is None
+
+
+def test_declare_claim_validates_classification(tmp_path: Path) -> None:
+    db = ArtifactDatabase(idse_root=tmp_path / ".idse")
+    gate = BlueprintPromotionGate(db)
+    project = "demo"
+    db.save_artifact(project, "__blueprint__", "intent", "Founding intent.")
+
+    with pytest.raises(ValueError, match="classification"):
+        gate.declare_claim(
+            project,
+            claim_text="A claim",
+            classification="not-valid",
+            source_session="__blueprint__",
+            source_stages=["intent"],
+        )
+
+
+def test_reinforce_claim_records_event_without_status_change(tmp_path: Path) -> None:
+    db = ArtifactDatabase(idse_root=tmp_path / ".idse")
+    gate = BlueprintPromotionGate(db)
+    project = "demo"
+    claim_id = db.save_blueprint_claim(
+        project,
+        claim_text="A claim",
+        classification="invariant",
+        promotion_record_id=_promotion_record_id(db, project, "A claim"),
+        origin="converged",
+    )
+
+    result = gate.reinforce_claim(
+        project,
+        claim_id=claim_id,
+        reinforcing_session="session-1",
+        reinforcing_stage="feedback",
+        actor="system",
+    )
+    claim = db.get_blueprint_claims(project, status="active")[0]
+    events = db.get_lifecycle_events(project, claim_id=claim_id)
+
+    assert result["event"] == "reinforced"
+    assert claim["status"] == "active"
+    assert events[0]["old_status"] == "active"
+    assert events[0]["new_status"] == "active"
+    assert events[0]["reason"] == "Reinforced by session-1:feedback"
+
+
+def test_reinforce_claim_rejects_nonexistent_claim(tmp_path: Path) -> None:
+    db = ArtifactDatabase(idse_root=tmp_path / ".idse")
+    gate = BlueprintPromotionGate(db)
+
+    with pytest.raises(ValueError, match="not found"):
+        gate.reinforce_claim(
+            "demo",
+            claim_id=999,
+            reinforcing_session="session-1",
+            reinforcing_stage="feedback",
+        )
+
+
+def test_reinforce_claim_rejects_inactive_claim(tmp_path: Path) -> None:
+    db = ArtifactDatabase(idse_root=tmp_path / ".idse")
+    gate = BlueprintPromotionGate(db)
+    project = "demo"
+    claim_id = db.save_blueprint_claim(
+        project,
+        claim_text="A claim",
+        classification="invariant",
+        promotion_record_id=_promotion_record_id(db, project, "A claim"),
+        origin="converged",
+    )
+    db.update_claim_status(claim_id, "invalidated")
+
+    with pytest.raises(ValueError, match="only active claims can be reinforced"):
+        gate.reinforce_claim(
+            project,
+            claim_id=claim_id,
+            reinforcing_session="session-1",
+            reinforcing_stage="feedback",
+        )
+
+
+def test_blueprint_md_shows_declared_origin(tmp_path: Path) -> None:
+    idse_root = tmp_path / ".idse"
+    db = ArtifactDatabase(idse_root=idse_root)
+    project = "demo"
+    db.ensure_session(project, "__blueprint__", is_blueprint=True, session_type="blueprint", status="draft")
+    db.save_blueprint_claim(
+        project,
+        claim_text="Declared claim text",
+        classification="invariant",
+        promotion_record_id=None,
+        origin="declared",
+    )
+    content = FileViewGenerator(idse_root=idse_root).apply_allowed_promotions_to_blueprint(project).read_text()
+
+    assert "[invariant|declared] Declared claim text" in content
+
+
+def test_blueprint_md_shows_converged_origin(tmp_path: Path) -> None:
+    idse_root = tmp_path / ".idse"
+    db = ArtifactDatabase(idse_root=idse_root)
+    project = "demo"
+    _seed_promotions(db, project)
+    content = FileViewGenerator(idse_root=idse_root).apply_allowed_promotions_to_blueprint(project).read_text()
+
+    assert "[invariant|converged] SQLite is the authoritative storage backend for project artifacts." in content
+
+
+def test_meta_md_shows_origin_per_claim(tmp_path: Path) -> None:
+    idse_root = tmp_path / ".idse"
+    db = ArtifactDatabase(idse_root=idse_root)
+    project = "demo"
+    _seed_promotions(db, project)
+    db.save_blueprint_claim(
+        project,
+        claim_text="Declared claim text",
+        classification="boundary",
+        promotion_record_id=None,
+        origin="declared",
+    )
+    generator = FileViewGenerator(idse_root=idse_root)
+    generator.apply_allowed_promotions_to_blueprint(project)
+    meta = generator.generate_blueprint_meta(project).read_text()
+
+    assert "Origin: converged" in meta
+    assert "Origin: declared" in meta

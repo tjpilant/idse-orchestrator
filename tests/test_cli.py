@@ -592,6 +592,103 @@ def test_cli_blueprint_promote_allows_and_regenerates(tmp_path):
         assert "SQLite is default storage backend." in scope
 
 
+def test_cli_blueprint_declare_creates_declared_claim(tmp_path):
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        idse_root = Path(".") / ".idse"
+        project = "demo"
+        (idse_root / "projects" / project / "sessions" / "__blueprint__" / "metadata").mkdir(
+            parents=True, exist_ok=True
+        )
+
+        from idse_orchestrator.artifact_database import ArtifactDatabase
+
+        db = ArtifactDatabase(idse_root=idse_root)
+        db.save_artifact(project, "__blueprint__", "intent", "Founding intent")
+        db.save_artifact(project, "__blueprint__", "spec", "Founding spec")
+
+        result = runner.invoke(
+            main,
+            [
+                "blueprint",
+                "declare",
+                "--project",
+                project,
+                "--claim",
+                "SQLite is the authoritative storage backend for project artifacts.",
+                "--classification",
+                "invariant",
+                "--source",
+                "__blueprint__:intent",
+                "--source",
+                "__blueprint__:spec",
+            ],
+        )
+        assert result.exit_code == 0
+        assert "Declared claim" in result.output
+
+        claims = db.get_blueprint_claims(project)
+        assert len(claims) == 1
+        assert claims[0]["origin"] == "declared"
+        assert claims[0]["promotion_record_id"] is None
+
+
+def test_cli_blueprint_reinforce_records_event(tmp_path):
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        idse_root = Path(".") / ".idse"
+        project = "demo"
+        (idse_root / "projects" / project / "sessions" / "__blueprint__" / "metadata").mkdir(
+            parents=True, exist_ok=True
+        )
+
+        from idse_orchestrator.artifact_database import ArtifactDatabase
+
+        db = ArtifactDatabase(idse_root=idse_root)
+        db.save_artifact(project, "session-1", "feedback", "Reinforcement evidence")
+        candidate_id = db.save_promotion_candidate(
+            project,
+            claim_text="SQLite is authoritative.",
+            classification="invariant",
+            evidence_hash="seed-hash",
+            failed_tests=[],
+            evidence={},
+            source_artifact_ids=[],
+        )
+        promotion_record_id = db.save_promotion_record(
+            project,
+            candidate_id=candidate_id,
+            status="ALLOW",
+            promoted_claim="SQLite is authoritative.",
+            evidence_hash="seed-hash",
+        )
+        claim_id = db.save_blueprint_claim(
+            project,
+            claim_text="SQLite is authoritative.",
+            classification="invariant",
+            promotion_record_id=promotion_record_id,
+        )
+
+        result = runner.invoke(
+            main,
+            [
+                "blueprint",
+                "reinforce",
+                "--project",
+                project,
+                "--claim-id",
+                str(claim_id),
+                "--source",
+                "session-1:feedback",
+            ],
+        )
+        assert result.exit_code == 0
+        assert "Reinforced claim" in result.output
+
+        events = db.get_lifecycle_events(project, claim_id=claim_id)
+        assert events[0]["reason"] == "Reinforced by session-1:feedback"
+
+
 def test_cli_blueprint_extract_candidates(tmp_path):
     runner = CliRunner()
     with runner.isolated_filesystem(temp_dir=tmp_path):

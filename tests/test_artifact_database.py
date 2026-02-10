@@ -245,3 +245,92 @@ def test_backfill_idse_id_for_legacy_rows(tmp_path: Path) -> None:
     db = ArtifactDatabase(db_path=db_path)
     rec = db.load_artifact("demo", "s1", "intent")
     assert rec.idse_id == "demo::s1::intent"
+
+
+def test_blueprint_claims_migration_defaults_origin_to_converged(tmp_path: Path) -> None:
+    idse_root = tmp_path / ".idse"
+    idse_root.mkdir(parents=True, exist_ok=True)
+    db_path = idse_root / "idse.db"
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            CREATE TABLE projects (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                stack TEXT,
+                owner TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                current_session_id TEXT
+            );
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE promotion_records (
+                id INTEGER PRIMARY KEY,
+                project_id INTEGER NOT NULL,
+                candidate_id INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                promoted_claim TEXT,
+                evidence_hash TEXT,
+                created_at TEXT NOT NULL,
+                promoted_at TEXT
+            );
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE blueprint_claims (
+                claim_id INTEGER PRIMARY KEY,
+                project_id INTEGER NOT NULL,
+                claim_text TEXT NOT NULL,
+                classification TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'active',
+                supersedes_claim_id INTEGER,
+                promotion_record_id INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(project_id, claim_text)
+            );
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO projects (id, name, stack, owner, created_at, updated_at, current_session_id)
+            VALUES (1, 'demo', 'python', 'system', '2026-02-07T00:00:00', '2026-02-07T00:00:00', NULL);
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO promotion_records (
+                id, project_id, candidate_id, status, promoted_claim, evidence_hash, created_at, promoted_at
+            )
+            VALUES (
+                1, 1, 1, 'ALLOW', 'Legacy converged claim', 'legacy-hash',
+                '2026-02-07T00:00:00', '2026-02-07T00:00:00'
+            );
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO blueprint_claims (
+                claim_id, project_id, claim_text, classification, status, supersedes_claim_id,
+                promotion_record_id, created_at, updated_at
+            )
+            VALUES (
+                1, 1, 'Legacy converged claim', 'invariant', 'active', NULL, 1,
+                '2026-02-07T00:00:00', '2026-02-07T00:00:00'
+            );
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    db = ArtifactDatabase(db_path=db_path)
+    claims = db.get_blueprint_claims("demo")
+    assert len(claims) == 1
+    assert claims[0]["origin"] == "converged"
