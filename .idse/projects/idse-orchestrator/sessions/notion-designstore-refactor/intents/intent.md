@@ -57,3 +57,4 @@ The current `NotionDesignStore` was built before the SQLite CMS refactor. It ope
 ## Time / Priority
 - Deadline or target release: Next development cycle.
 - Criticality / priority: High — required for reliable multi-platform sync.
+

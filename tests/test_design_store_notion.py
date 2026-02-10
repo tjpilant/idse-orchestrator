@@ -32,14 +32,12 @@ def test_notion_text_type_normalizes():
     store = NotionDesignStore(
         database_id="db123",
         properties={
-            "project": {"name": "Project", "type": "text"},
             "session": {"name": "Session", "type": "text"},
             "stage": {"name": "Stage", "type": "select"},
             "content": {"name": "page_body", "type": "page_body"},
         },
     )
 
-    assert store.properties["project"]["type"] == "rich_text"
     assert store.properties["session"]["type"] == "rich_text"
     assert store.properties["content"]["type"] == "page_body"
 
@@ -49,14 +47,12 @@ def test_flatten_property_values():
 
     properties = {
         "Title": {"title": [{"plain_text": "Intent"}]},
-        "Project": {"rich_text": [{"plain_text": "demo"}]},
         "Stage": {"select": {"name": "intent"}},
         "Status": {"status": {"name": "in_progress"}},
     }
 
     assert _flatten_property_values(properties) == {
         "Title": "Intent",
-        "Project": "demo",
         "Stage": "intent",
         "Status": "in_progress",
     }
@@ -66,7 +62,6 @@ def test_notion_schema_map_computed_fields():
     props = {
         "title": {"name": "Title", "type": "title"},
         "idse_id": {"name": "IDSE_ID", "type": "rich_text"},
-        "project": {"name": "Project", "type": "rich_text"},
         "session": {"name": "Session", "type": "rich_text"},
         "stage": {"name": "Stage", "type": "select"},
         "status": {"name": "Status", "type": "status"},
@@ -92,7 +87,8 @@ def test_notion_schema_map_computed_fields():
     )
 
     fields = result["fields"]
-    assert fields["title"] == "Test Plan – feature-v2"
+    assert fields["title"] == "Implementation – feature-v2"
+    assert "project" not in fields
     assert fields["idse_id"] == "demo::feature-v2::implementation"
     assert fields["status"] == "In Review"
     assert fields["layer"] == "Platform"
@@ -143,6 +139,20 @@ def test_notion_schema_map_excludes_create_only_fields_on_update():
     assert result["fields"]["session"] == "feature-v2"
 
 
+def test_title_uses_stage_session_format():
+    schema_map = NotionSchemaMap(NotionDesignStore.DEFAULT_PROPERTIES)
+    result = schema_map.build_projection(
+        project="idse-orchestrator",
+        session_id="my-session",
+        stage="intent",
+        content="# Intent",
+        include_idse_id=False,
+        content_type="page_body",
+    )
+    assert result["fields"]["title"] == "Intent – my-session"
+    assert "project" not in result["fields"]
+
+
 def test_resolve_page_id_uses_sync_metadata_cache(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     from idse_orchestrator.artifact_database import ArtifactDatabase
@@ -181,6 +191,46 @@ def test_resolve_page_id_fallback_queries_and_caches(tmp_path, monkeypatch):
 
     meta = db.get_sync_metadata(artifact_id, "notion")
     assert meta["remote_id"] == "page-fallback-1"
+
+
+def test_resolve_page_id_prefers_idse_id_query(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    idse_root = tmp_path / ".idse"
+    db = ArtifactDatabase(idse_root=idse_root)
+    db.save_artifact("demo", "s1", "intent", "hello")
+
+    store = NotionDesignStore(database_id="db123")
+    calls = []
+
+    def fake_query(filters):
+        calls.append(filters)
+        return [{"id": "page-by-idse"}]
+
+    monkeypatch.setattr(store, "_query_database", fake_query)
+    page_id = store._resolve_page_id("demo", "s1", "intent")
+    assert page_id == "page-by-idse"
+    assert calls
+    assert calls[0][0]["property"] == "IDSE_ID"
+
+
+def test_resolve_page_id_skips_archived_pages(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    idse_root = tmp_path / ".idse"
+    db = ArtifactDatabase(idse_root=idse_root)
+    db.save_artifact("demo", "s1", "intent", "hello")
+
+    store = NotionDesignStore(database_id="db123")
+    monkeypatch.setattr(
+        store,
+        "_query_database",
+        lambda _filters: [
+            {"id": "page-old-archived", "archived": True, "last_edited_time": "2026-02-01T00:00:00Z"},
+            {"id": "page-live", "archived": False, "last_edited_time": "2026-02-02T00:00:00Z"},
+        ],
+    )
+
+    page_id = store._resolve_page_id("demo", "s1", "intent")
+    assert page_id == "page-live"
 
 
 def test_save_artifact_skips_when_hash_unchanged(tmp_path, monkeypatch):
@@ -485,6 +535,29 @@ def test_save_artifact_notion_create_pages_payload_structure(monkeypatch):
     assert payload["pages"][0]["content"] == "body text"
 
 
+def test_save_artifact_create_payload_includes_idse_id(monkeypatch):
+    store = NotionDesignStore(database_id="db123")
+    monkeypatch.setattr(store, "_should_skip_push", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(store, "_resolve_page_id", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(store, "_load_session_context", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(store, "_save_push_metadata", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(store, "_sync_dependencies_to_remote", lambda *_args, **_kwargs: None)
+    captured = {"create_props": None}
+
+    def fake_call(tool_name, payload):
+        if tool_name == store.tool_names["create_page"]:
+            captured["create_props"] = payload.get("pages", [{}])[0].get("properties", {})
+            return {"id": "page-create-1"}
+        return {"ok": True}
+
+    store.tool_names["create_page"] = "notion-create-pages"
+    monkeypatch.setattr(store, "_call_tool", fake_call)
+
+    store.save_artifact("demo", "s1", "intent", "body")
+    assert captured["create_props"] is not None
+    assert captured["create_props"]["IDSE_ID"] == "demo::s1::intent"
+
+
 def test_save_artifact_update_path_uses_update_and_replace_not_create(monkeypatch):
     store = NotionDesignStore(database_id="db123")
     monkeypatch.setattr(store, "_should_skip_push", lambda *_args, **_kwargs: False)
@@ -515,11 +588,10 @@ def test_save_artifact_update_path_uses_update_and_replace_not_create(monkeypatc
     assert calls
     assert all(tool != store.tool_names["create_page"] for tool, _ in calls)
     update_cmds = [payload.get("data", {}).get("command") for tool, payload in calls if tool == store.tool_names["update_page"]]
-    assert "update_properties" in update_cmds
     assert "replace_content" in update_cmds
 
 
-def test_save_artifact_update_path_excludes_title_field(monkeypatch):
+def test_save_artifact_update_path_does_not_send_update_properties(monkeypatch):
     store = NotionDesignStore(database_id="db123")
     monkeypatch.setattr(store, "_should_skip_push", lambda *_args, **_kwargs: False)
     monkeypatch.setattr(store, "_resolve_page_id", lambda *_args, **_kwargs: "existing-page-2")
@@ -536,10 +608,10 @@ def test_save_artifact_update_path_excludes_title_field(monkeypatch):
     store.save_artifact("demo", "s2", "plan", "updated body")
 
     prop_payloads = [
-        payload.get("data", {}).get("properties", {})
+        payload
         for tool, payload in calls
         if tool == store.tool_names["update_page"]
         and payload.get("data", {}).get("command") == "update_properties"
     ]
-    assert prop_payloads
-    assert "Title" not in prop_payloads[0]
+    assert not prop_payloads
+

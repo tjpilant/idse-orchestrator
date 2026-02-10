@@ -7,7 +7,6 @@ This document tracks all sessions spawned from this Blueprint.
 ### Active Sessions
 - `__blueprint__` (THIS SESSION) - Project governance and roadmap
 - `designstore-file-artifacts` - Feature session
-- `notion-designstore-refactor` - Feature session
 - `item8-test-session` - Feature session
 
 ## Session Status Matrix
@@ -17,7 +16,7 @@ This document tracks all sessions spawned from this Blueprint.
 | __blueprint__ | blueprint | draft | system | 2026-02-04 | 0% |
 | designstore-file-artifacts | feature | draft | system | 2026-02-04 | 0% |
 | sqlite-cms-refactor | feature | complete | system | 2026-02-04 | 100% |
-| notion-designstore-refactor | feature | in_progress | tjpilant | 2026-02-07 | 86% |
+| notion-designstore-refactor | feature | complete | tjpilant | 2026-02-07 | 86% |
 | item8-test-session | feature | draft | system | 2026-02-09 | 0% |
 
 ## Lineage Graph
@@ -50,7 +49,7 @@ Feedback from Feature Sessions flows upward to inform Blueprint updates.
 ## Feedback & Lessons Learned
 
 - `sqlite-cms-refactor`: Stored project state as JSON in SQLite for parity with legacy `session_state.json`.; Clarify defaults: SQLite is default for new projects; filesystem is legacy/explicit opt-in.; Session state file should become a generated view of CURRENT_SESSION state from SQLite.
-- `notion-designstore-refactor`: Added `Feedback & Lessons Learned` rollup to blueprint meta.; Enforced section variants (`Summary`, `Executive Summary`, `Lessons Learned`) and bullet truncation (200 chars).; Storage/sync split adopted:; Storage default remains SQLite (`storage_backend`).; Sync target uses independent `sync_backend`.
+- `notion-designstore-refactor`: MCP tool parameter discovery must be treated as runtime-contract validation; payload shape assumptions are high-risk without live verification.; Notion `status` properties require strict shape/value compatibility; normalization/mapping is required for reliable automation.; Fallback create payloads should include explicit parent typing (`type: database_id`) to remain compatible across tool/runtime variants.; Added `Feedback & Lessons Learned` rollup to blueprint meta.; Enforced section variants (`Summary`, `Executive Summary`, `Lessons Learned`) and bullet truncation (200 chars).
 
 ## Blueprint Promotion Record
 
@@ -93,4 +92,4 @@ Use this section for high-detail blueprint context that should survive metadata 
 <!-- END CUSTOM NARRATIVE -->
 
 ---
-*Last updated: 2026-02-09T19:31:08.945842*
+*Last updated: 2026-02-10T03:23:34.737341*

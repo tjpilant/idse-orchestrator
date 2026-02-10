@@ -24,6 +24,7 @@ class NotionDesignStore(MCPDesignStoreAdapter):
 
     DEFAULT_PROPERTIES = {
         "title": {"name": "Title", "type": "title"},
+        "idse_id": {"name": "IDSE_ID", "type": "rich_text"},
         "session": {"name": "Session", "type": "rich_text"},
         "stage": {"name": "Stage", "type": "select"},
         "status": {"name": "Status", "type": "status"},
@@ -128,32 +129,10 @@ class NotionDesignStore(MCPDesignStoreAdapter):
             content=content,
             session_context=session_context,
         )
-        
-        # Flatten properties for fallback paths where IDSE_ID may be unsupported.
-        flat_update_properties = _flatten_property_values(update_payload["properties"])
 
         if page_id:
-            # Update existing page
+            # Existing pages are content-authoritative in Notion; only replace content.
             if self.tool_names.get("update_page"):
-                payload_props = {
-                    "data": {
-                        "page_id": page_id,
-                        "command": "update_properties",
-                        "properties": _flatten_property_values(update_payload["properties"]),
-                    }
-                }
-                if self.debug:
-                    _debug_payload(self.tool_names["update_page"], payload_props)
-                try:
-                    result = self._call_tool(self.tool_names["update_page"], payload_props)
-                except Exception:
-                    payload_props["data"]["properties"] = _drop_idse_id(
-                        flat_update_properties, self.properties
-                    )
-                    result = self._call_tool(self.tool_names["update_page"], payload_props)
-                if self.debug:
-                    _debug_result(self.tool_names["update_page"], result)
-
                 if update_payload["content_payload"] is not None:
                     payload_content = {
                         "data": {
@@ -269,10 +248,8 @@ class NotionDesignStore(MCPDesignStoreAdapter):
         self._sync_dependencies_to_remote(project, session_id, stage, created_page_id)
 
     def list_sessions(self, project: str) -> List[str]:
-        filters: List[Dict[str, Any]] = []
-        if "project" in self.properties:
-            filters.append(self._property_filter("project", project))
-        results = self._query_database(filters=filters)
+        _ = project  # Project is encoded in title, not a discrete Notion property.
+        results = self._query_database(filters=[])
         sessions = set()
         for page in results:
             session = self._extract_property_text(page, "session")
@@ -331,7 +308,7 @@ class NotionDesignStore(MCPDesignStoreAdapter):
             )
             checks.append("Notion database is reachable")
 
-            for key in ("project", "session", "stage", "content"):
+            for key in ("session", "stage", "content"):
                 if key == "content" and self._content_type() == "page_body":
                     checks.append("Content stored in page body (no property check)")
                     continue
@@ -651,14 +628,21 @@ class NotionDesignStore(MCPDesignStoreAdapter):
             except Exception:
                 pass
 
+        if self.use_idse_id and "idse_id" in self.properties:
+            idse_results = self._query_database(
+                [self._property_filter("idse_id", _make_idse_id(project, session_id, stage))]
+            )
+            page_id = _select_best_active_page_id(idse_results)
+            if page_id:
+                self._cache_remote_id(project, session_id, stage, page_id)
+                return page_id
+
         filters = [
             self._property_filter("session", session_id),
             self._property_filter("stage", _format_stage_value(stage)),
         ]
         results = self._query_database(filters)
-        if not results:
-            return None
-        page_id = _extract_page_id(results[0])
+        page_id = _select_best_active_page_id(results)
         if page_id:
             self._cache_remote_id(project, session_id, stage, page_id)
         return page_id
@@ -827,8 +811,7 @@ class NotionSchemaMap:
     RUN_SCOPE_TAGS = {"full", "feature", "module", "component", "task", "hotfix"}
     FIELD_MODES = {
         "title": "create_only",
-        "idse_id": "optional",
-        "project": "optional",
+        "idse_id": "always_sync",
         "session": "always_sync",
         "stage": "always_sync",
         "status": "optional",
@@ -866,7 +849,6 @@ class NotionSchemaMap:
     ) -> Dict[str, Any]:
         tag_list = tags or []
         fields: Dict[str, Optional[str]] = {
-            "project": project,
             "session": session_id,
             "stage": _format_stage_value(stage),
             "title": f"{_format_stage_value(stage)} – {session_id}",
@@ -1059,7 +1041,7 @@ def _format_stage_value(stage: str) -> str:
         "spec": "Specification",
         "plan": "Plan",
         "tasks": "Tasks",
-        "implementation": "Test Plan",
+        "implementation": "Implementation",
         "feedback": "Feedback",
     }
     return mapping.get(stage, stage)
@@ -1085,6 +1067,27 @@ def _drop_idse_id(properties: Dict[str, Any], prop_map: Dict[str, Dict[str, str]
     if name in properties:
         return {k: v for k, v in properties.items() if k != name}
     return properties
+
+
+def _is_archived_page(page: Dict[str, Any]) -> bool:
+    return bool(page.get("archived")) or bool(page.get("in_trash"))
+
+
+def _select_best_active_page_id(results: List[Dict[str, Any]]) -> Optional[str]:
+    if not results:
+        return None
+    active = [page for page in results if not _is_archived_page(page)]
+    candidates = active or results
+    candidates = sorted(
+        candidates,
+        key=lambda p: p.get("last_edited_time") or "",
+        reverse=True,
+    )
+    for page in candidates:
+        page_id = _extract_page_id(page)
+        if page_id:
+            return page_id
+    return None
 
 
 def _debug_payload(tool_name: str, payload: Dict[str, Any]) -> None:
