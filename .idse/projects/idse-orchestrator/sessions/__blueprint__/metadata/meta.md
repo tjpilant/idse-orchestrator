@@ -16,7 +16,7 @@ This document tracks all sessions spawned from this Blueprint.
 | __blueprint__ | blueprint | draft | system | 2026-02-04 | 0% |
 | designstore-file-artifacts | feature | draft | system | 2026-02-04 | 0% |
 | sqlite-cms-refactor | feature | complete | system | 2026-02-04 | 100% |
-| notion-designstore-refactor | feature | complete | tjpilant | 2026-02-07 | 86% |
+| notion-designstore-refactor | feature | complete | tjpilant | 2026-02-07 | 100% |
 | item8-test-session | feature | draft | system | 2026-02-09 | 0% |
 
 ## Lineage Graph
@@ -49,7 +49,7 @@ Feedback from Feature Sessions flows upward to inform Blueprint updates.
 ## Feedback & Lessons Learned
 
 - `sqlite-cms-refactor`: Stored project state as JSON in SQLite for parity with legacy `session_state.json`.; Clarify defaults: SQLite is default for new projects; filesystem is legacy/explicit opt-in.; Session state file should become a generated view of CURRENT_SESSION state from SQLite.
-- `notion-designstore-refactor`: MCP tool parameter discovery must be treated as runtime-contract validation; payload shape assumptions are high-risk without live verification.; Notion `status` properties require strict shape/value compatibility; normalization/mapping is required for reliable automation.; Fallback create payloads should include explicit parent typing (`type: database_id`) to remain compatible across tool/runtime variants.; Added `Feedback & Lessons Learned` rollup to blueprint meta.; Enforced section variants (`Summary`, `Executive Summary`, `Lessons Learned`) and bullet truncation (200 chars).
+- `notion-designstore-refactor`: **MCP Parameter Discovery**: Use `mcp_github` tools for code, but rely on `describe` or direct schema fetches for Notion. The Notion API shapes for `parent` (needs explicit `type: database_id`) and...; **Status Property Shape**: Notion's `status` property is an object, not a simple string. Flattening payloads for `create_page` vs `update_page` required distinct handling.; **Fallback Parent Format**: The initial implementation assumed `parent: { database_id: ... }` was sufficient, but `parent: { type: "database_id", database_id: ... }` is strictly required.
 
 ## Blueprint Promotion Record
 
@@ -92,4 +92,4 @@ Use this section for high-detail blueprint context that should survive metadata 
 <!-- END CUSTOM NARRATIVE -->
 
 ---
-*Last updated: 2026-02-10T03:23:34.737341*
+*Last updated: 2026-02-10T03:26:56.565636*
