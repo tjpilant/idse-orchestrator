@@ -18,11 +18,13 @@ This document tracks all sessions spawned from this Blueprint.
 | sqlite-cms-refactor | feature | complete | system | 2026-02-04 | 100% |
 | notion-designstore-refactor | feature | complete | tjpilant | 2026-02-07 | 100% |
 | item8-test-session | feature | draft | system | 2026-02-09 | 0% |
+| component-impact-parser | feature | complete | system | 2026-02-10 | 0% |
 
 ## Lineage Graph
 
 ```
 __blueprint__ (root)
+├── component-impact-parser
 ├── designstore-file-artifacts
 ├── item8-test-session
 ├── notion-designstore-refactor
@@ -45,11 +47,13 @@ Feedback from Feature Sessions flows upward to inform Blueprint updates.
 - `sqlite-cms-refactor`: Implemented SQLite core storage via `ArtifactDatabase`.; Added `DesignStoreSQLite` backend and config support.; Added unit tests for SQLite CRUD and schema creation.; Added `FileViewGenerator` and `idse export` command.; Added file-to-DB migration tooling and `idse migrate` command.
 - `notion-designstore-refactor`: Enhanced blueprint metadata rollup to include delivery and feedback lessons from SQLite artifacts.; Hardened markdown section extraction to support `#`, `##`, `###`, and `Executive Summary` variants.; Refactored backend semantics: SQLite is now treated as storage core while sync uses a separate `sync_backend`.; Added session metadata management commands to avoid direct JSON edits:; `idse session set-owner`
 - `item8-test-session`: **ComponentName** (source_module.py); Parent Primitives: PrimitiveA, PrimitiveB; Type: Projection/Operation/Infrastructure/Routing; Changes: [brief description]; **NewComponentName** (source_module.py)
+- `component-impact-parser`: Updated validation engine to enforce implementation artifact quality:; `src/idse_orchestrator/validation_engine.py`; `implementation.md` is validated as a first-class artifact.; Placeholder markers now fail validation.; `Component Impact Report` section and component entries are required.
 
 ## Feedback & Lessons Learned
 
 - `sqlite-cms-refactor`: Stored project state as JSON in SQLite for parity with legacy `session_state.json`.; Clarify defaults: SQLite is default for new projects; filesystem is legacy/explicit opt-in.; Session state file should become a generated view of CURRENT_SESSION state from SQLite.
 - `notion-designstore-refactor`: **MCP Parameter Discovery**: Use `mcp_github` tools for code, but rely on `describe` or direct schema fetches for Notion. The Notion API shapes for `parent` (needs explicit `type: database_id`) and...; **Status Property Shape**: Notion's `status` property is an object, not a simple string. Flattening payloads for `create_page` vs `update_page` required distinct handling.; **Fallback Parent Format**: The initial implementation assumed `parent: { database_id: ... }` was sufficient, but `parent: { type: "database_id", database_id: ... }` is strictly required.
+- `component-impact-parser`: Decision: Keep enforcement guardrails; do not reintroduce parser/database component-sync feature in this session.; Decision: Accept implementation report as sufficient session output for governance and handoff.; Decision: Storage-side agents own operational use of report data post-closeout.
 
 ## Blueprint Promotion Record
 
@@ -92,4 +96,4 @@ Use this section for high-detail blueprint context that should survive metadata 
 <!-- END CUSTOM NARRATIVE -->
 
 ---
-*Last updated: 2026-02-10T03:26:56.565636*
+*Last updated: 2026-02-10T05:01:17.935428*
