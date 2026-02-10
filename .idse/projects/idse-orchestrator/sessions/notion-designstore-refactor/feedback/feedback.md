@@ -141,3 +141,26 @@
 - Live sync push reached `notion-update-page` update path for all stages, confirming create-vs-update routing is operating.
 - Runtime failure observed across all stages: Notion API validation error `Property "Project" not found` (HTTP 400) from the target database schema.
 - This is a schema/config mismatch outside Item 9 fallback-parent fix scope; code currently still sends `Project` in update payload for this workspace.
+
+## Session Closeout (2026-02-10)
+
+### Delivery Summary
+- Completed Phases 0-4 for Notion DesignStore refactor: schema foundation, schema mapping, hash-based sync, dependency sync, and hardening.
+- Completed Item 7: Agent profile + three-tier reasoning guidance injection across agent instruction surfaces.
+- Completed Item 8: Implementation scaffold and wizard fallback updates with Component Impact Report structure.
+- Completed Item 9: Notion E2E sync verification and fallback parent-format/update-path fixes.
+- Completed Item 10: Notion schema architecture validation of the mandatory three-hop chain (`Artifact -> Component -> Primitive`), including verified `Component(s)` relation linkage and operational component impact linking.
+
+### Known Residuals
+- Notion workspace/schema mismatch can still surface `Property "Project" not found` on certain update paths when workspace fields diverge from expected mapping.
+- Residual is non-blocking for session closeout because core sync path, hash behavior, dependency mapping, and three-hop architecture validation are complete and validated.
+
+### Lessons Learned
+- MCP tool parameter discovery must be treated as runtime-contract validation; payload shape assumptions are high-risk without live verification.
+- Notion `status` properties require strict shape/value compatibility; normalization/mapping is required for reliable automation.
+- Fallback create payloads should include explicit parent typing (`type: database_id`) to remain compatible across tool/runtime variants.
+
+### Future Work Recommendations
+- Add an optional automated parser in `idse sync push` to consume Component Impact Report sections and auto-link artifacts to Components in Notion.
+- Add a lightweight schema-capability preflight in sync commands to detect property mismatches (for example `Project`) before stage update loops.
+- Consider codifying MCP payload adapters per tool/version to reduce future breakage from surface-level parameter shifts.

@@ -241,3 +241,98 @@ Created: 2026-02-07T21:34:19.010190
   - `PYTHONPATH=src .venv/bin/pytest tests/test_design_store_notion.py -v` => `22 passed`
   - `PYTHONPATH=src .venv/bin/pytest -q` => `106 passed`
   - Live E2E: `PYTHONPATH=src .venv/bin/idse sync push --debug --yes --project idse-orchestrator` executed and reached update path calls per stage.
+
+## Component Impact Report
+
+### Modified Components
+- **ArtifactDatabase** (artifact_database.py)
+  - Parent Primitives: PipelineArtifacts, DesignStore, SessionGraph, StageStateModel, ConstitutionRules, ValidationEngine
+  - Type: Infrastructure
+  - Changes: Added idse_id column, sync_metadata table, artifact_dependencies table, blueprint_integrity/integrity_events tables, blueprint_claims/claim_lifecycle_events tables, promotion_records/promotion_candidates tables, artifact_edges/feedback_signals tables, semantic_fingerprint column
+
+- **FileViewGenerator** (file_view_generator.py)
+  - Parent Primitives: DesignStore, PipelineArtifacts
+  - Type: Projection
+  - Changes: Enhanced blueprint meta rollup (delivery summary, feedback lessons), blueprint integrity verification, claim lifecycle display, demotion record rendering, section rebuild from active claims
+
+- **NotionDesignStore** (design_store_notion.py)
+  - Parent Primitives: DesignStore
+  - Type: Projection
+  - Changes: NotionSchemaMap with field modes, create/update property split, page ID resolution/caching, hash-based skip, dependency sync (push/pull), status mapping, fallback parent format fix, title formula alignment, vestigial project cleanup
+
+- **NotionSchemaMap** (design_store_notion.py)
+  - Parent Primitives: DesignStore
+  - Type: Projection
+  - Changes: Field modes (create_only/always_sync/optional), status value mapping, layer/run_scope derivation from tags
+
+- **ArtifactConfig** (artifact_config.py)
+  - Parent Primitives: ProjectWorkspace
+  - Type: Infrastructure
+  - Changes: Split storage_backend vs sync_backend, legacy compatibility mapping
+
+- **CLI Commands** (cli.py)
+  - Parent Primitives: CLIInterface, ConstitutionRules, DesignStore
+  - Type: Routing
+  - Changes: Sync push/pull with partial failure handling, blueprint promote/verify/claims/demote, session metadata (set-owner, add/remove-collaborator)
+
+### New Components Created
+- **BlueprintPromotionGate** (blueprint_promotion.py)
+  - Parent Primitive: ConstitutionRules
+  - Type: Operation
+  - Purpose: Machine-checkable promotion gate with session/stage diversity, semantic dedup, constitutional classification, feedback checks
+  - Area: Governance
+  - Layer: IDSE
+  - Milestone: MVP
+
+- **DemotionGate** (blueprint_promotion.py)
+  - Parent Primitive: ConstitutionRules
+  - Type: Operation
+  - Purpose: Governed claim demotion with mandatory reason, active-only constraint, supersession validation
+  - Area: Governance
+  - Layer: IDSE
+  - Milestone: MVP
+
+- **BlueprintIntegrityVerifier** (file_view_generator.py)
+  - Parent Primitive: ValidationEngine, PipelineArtifacts
+  - Type: Projection
+  - Purpose: Hash-based tamper detection for blueprint.md with integrity event logging
+  - Area: Governance
+  - Layer: IDSE
+  - Milestone: MVP
+
+- **DemotionRecordRenderer** (file_view_generator.py)
+  - Parent Primitive: PipelineArtifacts
+  - Type: Projection
+  - Purpose: Renders demotion events into meta.md for audit visibility
+  - Area: Governance
+  - Layer: IDSE
+  - Milestone: MVP
+
+- **SectionRebuilder** (file_view_generator.py)
+  - Parent Primitive: PipelineArtifacts
+  - Type: Projection
+  - Purpose: Rebuilds canonical blueprint sections from active claims only (replaces append-only)
+  - Area: Governance
+  - Layer: IDSE
+  - Milestone: MVP
+
+### Files Edited (no component mapping)
+- `.idse/docs/02-idse-constitution.md` - Article XI, XII doctrine
+- `.idse/governance/IDSE_CONSTITUTION.md` - mirror
+- `src/idse_orchestrator/governance/IDSE_CONSTITUTION.md` - mirror
+- `CLAUDE.md` - Three-Tier reasoning rules
+- `AGENTS.md` - Role-aware tier rules
+- `.cursorrules` - Condensed tier rules
+- `.idse/projects/idse-orchestrator/agent_registry.json` - profile + tier_access fields
+- `src/idse_orchestrator/resources/templates/implementation-scaffold.md` - Component Impact Report template
+- `src/idse_orchestrator/blueprint_wizard.py` - implementation stub update
+
+## Item 10 Completion — Notion Schema Architecture Validation
+- **Validation**: Confirmed "Three-Hop Chain" (`Artifact` -> `Component` -> `Primitive`) in Notion schemas.
+- **Outcome**: `Artifacts` database `Component(s)` relation verified pointing to `Components` database (`ee622e63...`).
+- **Compliance**: Architecture is now compliant with Agent Cognitive Doctrine (Mandatory Chain rule).
+- **Readiness**: Sync logic authorized for Component Impact Report automated linking.
+- **Evidence**:
+  - `mcp_makenotion_no_notion-fetch` confirmed `Component(s)` target `ee622e63...`.
+  - Manual verification of Component Lifecycle Agent operations successful.
+
