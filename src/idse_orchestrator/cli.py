@@ -1869,6 +1869,7 @@ def set_status(ctx, session_id: str, session_status: str, project: Optional[str]
     from .session_metadata import SessionMetadata
     from .stage_state_model import StageStateModel
     from .design_store_sqlite import DesignStoreSQLite
+    from .validation_engine import ValidationEngine
 
     try:
         manager, project_path, project_name = _resolve_project_path(project)
@@ -1905,6 +1906,20 @@ def set_status(ctx, session_id: str, session_status: str, project: Optional[str]
                 tracker.init_state(project_name, session_id, is_blueprint=metadata.is_blueprint)
 
         if normalized_status == "complete":
+            validator = ValidationEngine()
+            validation_results = validator.validate_project(
+                project_name=project_name,
+                backend_override=ctx.obj.get("backend_override") if ctx.obj else None,
+                session_id=session_id,
+            )
+            if not validation_results["valid"]:
+                click.echo(
+                    f"❌ Cannot mark {project_name}/{session_id} complete: validation failed",
+                    err=True,
+                )
+                for error in validation_results["errors"]:
+                    click.echo(f"   ✗ {error}", err=True)
+                sys.exit(1)
             for stage in tracker.STAGE_NAMES:
                 tracker.update_stage(stage, "completed")
             tracker.set_validation_status("passing")

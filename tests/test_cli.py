@@ -257,6 +257,19 @@ def test_cli_session_set_status_complete_updates_metadata_and_state(tmp_path):
 
         db = ArtifactDatabase(idse_root=idse_root)
         db.ensure_session(project, session_id, owner="system", status="draft")
+        db.save_artifact(project, session_id, "intent", "## Problem / Opportunity\nx\n## Stakeholders\nx\n## Success Criteria\nx\n")
+        db.save_artifact(project, session_id, "context", "## Constraints\nx\n")
+        db.save_artifact(project, session_id, "spec", "## Functional Requirements\nx\n")
+        db.save_artifact(project, session_id, "plan", "## Plan\nx\n")
+        db.save_artifact(project, session_id, "tasks", "## Phase\nx\n")
+        db.save_artifact(
+            project,
+            session_id,
+            "implementation",
+            "## Architecture\nx\n## What Was Built\nx\n## Validation Reports\nx\n## Deviations from Plan\nnone\n## Component Impact Report\n### Modified Components\n- **CLIInterface** (src/idse_orchestrator/cli.py)\n  - Parent Primitives: CLIInterface\n  - Type: Routing\n  - Changes: Added completion gate\n",
+        )
+        db.save_artifact(project, session_id, "feedback", "## Feedback\nx\n")
+        db.save_session_state(project, session_id, {"project_name": project, "session_id": session_id, "stages": {}})
 
         result = runner.invoke(
             main,
@@ -273,6 +286,53 @@ def test_cli_session_set_status_complete_updates_metadata_and_state(tmp_path):
 
         state = db.load_session_state(project, session_id)
         assert all(value == "completed" for value in state["stages"].values())
+
+
+def test_cli_session_set_status_complete_fails_on_placeholder_implementation(tmp_path):
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        idse_root = Path(".") / ".idse"
+        project = "demo"
+        session_id = "session-1"
+        session_dir = idse_root / "projects" / project / "sessions" / session_id
+        session_dir.mkdir(parents=True, exist_ok=True)
+
+        metadata_dir = session_dir / "metadata"
+        metadata_dir.mkdir(parents=True, exist_ok=True)
+        metadata = {
+            "session_id": session_id,
+            "name": session_id,
+            "session_type": "feature",
+            "description": None,
+            "is_blueprint": False,
+            "parent_session": "__blueprint__",
+            "related_sessions": [],
+            "owner": "system",
+            "collaborators": [],
+            "tags": [],
+            "status": "draft",
+            "created_at": "2026-02-07T00:00:00",
+            "updated_at": "2026-02-07T00:00:00",
+        }
+        (metadata_dir / "session.json").write_text(json.dumps(metadata, indent=2))
+
+        from idse_orchestrator.artifact_database import ArtifactDatabase
+
+        db = ArtifactDatabase(idse_root=idse_root)
+        db.ensure_session(project, session_id, owner="system", status="draft")
+        db.save_artifact(
+            project,
+            session_id,
+            "implementation",
+            "# Implementation: {{ project_name }}\n\n## Component Impact Report\n### Modified Components\n- **ComponentName** (source_module.py)\n",
+        )
+
+        result = runner.invoke(
+            main,
+            ["session", "set-status", session_id, "--project", project, "--status", "complete"],
+        )
+        assert result.exit_code != 0
+        assert "Cannot mark demo/session-1 complete: validation failed" in result.output
 
 
 def test_cli_session_set_stage_updates_single_stage_status(tmp_path):

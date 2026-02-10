@@ -16,7 +16,27 @@ from .constitution_rules import REQUIRED_SECTIONS
 class ValidationEngine:
     """Validates IDSE artifacts against constitutional rules."""
 
-    def validate_project(self, project_name: Optional[str] = None, backend_override: Optional[str] = None) -> Dict:
+    IMPLEMENTATION_PLACEHOLDERS = [
+        "{{ project_name }}",
+        "{{ session_id }}",
+        "{{ stack }}",
+        "{{ timestamp }}",
+        "[Describe the architecture of what was implemented]",
+        "[Summary of implementation work]",
+        "[Test results, coverage, linting]",
+        "[Any changes from the original plan, with justification]",
+        "ComponentName",
+        "NewComponentName",
+        "PrimitiveA",
+        "[List files that don't map to tracked components]",
+    ]
+
+    def validate_project(
+        self,
+        project_name: Optional[str] = None,
+        backend_override: Optional[str] = None,
+        session_id: Optional[str] = None,
+    ) -> Dict:
         """
         Validate an IDSE project's pipeline artifacts.
 
@@ -59,7 +79,7 @@ class ValidationEngine:
                     "warnings": [],
                 }
 
-        session_id = SessionGraph(project_path).get_current_session()
+        session_id = session_id or SessionGraph(project_path).get_current_session()
         session_path = project_path / "sessions" / session_id
         project_name = project_path.name
 
@@ -72,13 +92,14 @@ class ValidationEngine:
         errors: List[str] = []
         warnings: List[str] = []
 
-        artifacts = ["intent.md", "context.md", "spec.md", "plan.md", "tasks.md", "feedback.md"]
+        artifacts = ["intent.md", "context.md", "spec.md", "plan.md", "tasks.md", "implementation.md", "feedback.md"]
         artifact_stage_map = {
             "intent.md": "intent",
             "context.md": "context",
             "spec.md": "spec",
             "plan.md": "plan",
             "tasks.md": "tasks",
+            "implementation.md": "implementation",
             "feedback.md": "feedback",
         }
 
@@ -116,6 +137,35 @@ class ValidationEngine:
                     errors.append(f"{artifact} contains [REQUIRES INPUT] markers")
                 else:
                     checks.append(f"{artifact} has no [REQUIRES INPUT] markers")
+
+        # Additional enforcement for implementation artifacts:
+        # block unresolved scaffolds and require a structured impact section.
+        implementation_content = None
+        if use_db and db:
+            try:
+                implementation_content = db.load_artifact(project_name, session_id, "implementation").content
+            except FileNotFoundError:
+                implementation_content = None
+        else:
+            impl_path = self._get_artifact_path(session_path, "implementation.md")
+            if impl_path.exists():
+                implementation_content = impl_path.read_text()
+
+        if implementation_content is not None:
+            if "## Component Impact Report" not in implementation_content:
+                errors.append("implementation.md missing '## Component Impact Report' section")
+            else:
+                checks.append("implementation.md has section: Component Impact Report")
+
+            for marker in self.IMPLEMENTATION_PLACEHOLDERS:
+                if marker in implementation_content:
+                    errors.append(f"implementation.md contains placeholder content: {marker}")
+
+            component_bullet = re.search(r"^\s*-\s*\*\*[^*]+\*\*", implementation_content, re.MULTILINE)
+            if not component_bullet:
+                errors.append("implementation.md has no component entries in Component Impact Report")
+            else:
+                checks.append("implementation.md has component entries")
 
         for artifact, required_sections in REQUIRED_SECTIONS.items():
             content = None
@@ -168,6 +218,7 @@ class ValidationEngine:
             "spec.md": session_path / "specs" / "spec.md",
             "plan.md": session_path / "plans" / "plan.md",
             "tasks.md": session_path / "tasks" / "tasks.md",
+            "implementation.md": session_path / "implementation" / "README.md",
             "feedback.md": session_path / "feedback" / "feedback.md",
         }
 

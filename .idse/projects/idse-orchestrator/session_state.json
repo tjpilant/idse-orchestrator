@@ -1,6 +1,6 @@
 {
   "project_name": "idse-orchestrator",
-  "session_id": "notion-designstore-refactor",
+  "session_id": "component-impact-parser",
   "is_blueprint": false,
   "stages": {
     "intent": "completed",
@@ -11,7 +11,7 @@
     "implementation": "completed",
     "feedback": "completed"
   },
-  "last_sync": "2026-02-10T00:40:21.979112",
+  "last_sync": "2026-02-10T04:18:06.209021",
   "validation_status": "passing",
-  "created_at": "2026-02-07T22:25:18.230603"
+  "created_at": "2026-02-10T03:34:20.335627"
 }
