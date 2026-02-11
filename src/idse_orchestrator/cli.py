@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Optional
 from datetime import datetime
 import sys
+import re
+from urllib.parse import parse_qs, urlparse
 
 from . import __version__
 
@@ -697,18 +699,86 @@ def setup(ctx):
         config.config["sqlite"] = {"db_path": db_path}
 
     if backend == "notion":
-        database_id = click.prompt("Notion database ID")
+        target = click.prompt("Notion database/view URL or database ID")
+        parsed = _parse_notion_sync_target(target)
+        database_id = parsed.get("database_id")
+        view_id = parsed.get("database_view_id")
+        if not database_id:
+            database_id = click.prompt("Notion database ID")
+        if not view_id:
+            extra_view = click.prompt(
+                "Notion view URL or view ID (optional)",
+                default="",
+                show_default=False,
+            )
+            if extra_view:
+                view_id = _parse_notion_sync_target(extra_view).get("database_view_id")
         credentials_dir = click.prompt(
             "Credentials directory",
             default=str(Path.cwd() / "mnt" / "mcp_credentials"),
         )
-        config.config["notion"] = {
+        notion_cfg = {
             "database_id": database_id,
             "credentials_dir": credentials_dir,
         }
+        if view_id:
+            notion_cfg["database_view_id"] = view_id
+            notion_cfg["database_view_url"] = f"view://{view_id}"
+        config.config["notion"] = notion_cfg
 
     config.save()
     click.echo(f"✅ Saved config to {config.config_path}")
+
+
+def _normalize_uuid(value: str) -> Optional[str]:
+    compact = value.replace("-", "").strip()
+    if len(compact) == 32 and all(ch in "0123456789abcdefABCDEF" for ch in compact):
+        return compact.lower()
+    return None
+
+
+def _parse_notion_sync_target(raw: str) -> dict:
+    value = (raw or "").strip()
+    if not value:
+        return {}
+
+    # Direct UUID input -> database id.
+    direct = _normalize_uuid(value)
+    if direct:
+        return {"database_id": direct}
+
+    parsed = urlparse(value)
+    result: dict = {}
+
+    # Prefer explicit query params when present.
+    query = parse_qs(parsed.query)
+    for key in ("v", "view_id", "view"):
+        qv = query.get(key, [])
+        if qv:
+            view = _normalize_uuid(qv[0])
+            if view:
+                result["database_view_id"] = view
+                break
+
+    # Extract UUID-like values from URL path/title slug.
+    matches = re.findall(
+        r"[0-9a-fA-F]{32}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
+        value,
+    )
+    normalized = [_normalize_uuid(match) for match in matches]
+    normalized = [item for item in normalized if item]
+    if normalized:
+        result.setdefault("database_id", normalized[0])
+        if len(normalized) > 1:
+            result.setdefault("database_view_id", normalized[1])
+
+    # Support view://<uuid> directly.
+    if value.startswith("view://"):
+        view = _normalize_uuid(value.split("view://", 1)[1])
+        if view:
+            result["database_view_id"] = view
+
+    return result
 
 
 @sync.command()

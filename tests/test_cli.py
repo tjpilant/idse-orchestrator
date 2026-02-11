@@ -4,7 +4,7 @@ from pathlib import Path
 from click.testing import CliRunner
 
 import idse_orchestrator
-from idse_orchestrator.cli import main
+from idse_orchestrator.cli import main, _parse_notion_sync_target
 
 
 def test_version_exposed():
@@ -839,3 +839,43 @@ def test_cli_compile_agent_spec_passes_backend_override(tmp_path, monkeypatch):
 
         assert result.exit_code == 0
         assert captured["backend"] == "sqlite"
+
+
+def test_parse_notion_sync_target_extracts_database_and_view_ids():
+    parsed = _parse_notion_sync_target(
+        "https://www.notion.so/workspace/Agent-Spec-Compiler-123456781234123412341234567890ab?v=abcdefab-cdef-abcd-efab-cdefabcdefab"
+    )
+    assert parsed["database_id"] == "123456781234123412341234567890ab"
+    assert parsed["database_view_id"] == "abcdefabcdefabcdefabcdefabcdefab"
+
+
+def test_parse_notion_sync_target_handles_view_scheme_and_uuid():
+    parsed_db = _parse_notion_sync_target("12345678-1234-1234-1234-1234567890ab")
+    assert parsed_db["database_id"] == "123456781234123412341234567890ab"
+
+    parsed_view = _parse_notion_sync_target("view://abcdefab-cdef-abcd-efab-cdefabcdefab")
+    assert parsed_view["database_view_id"] == "abcdefabcdefabcdefabcdefabcdefab"
+
+
+def test_sync_setup_notion_accepts_url_and_extracts_ids(tmp_path):
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        config_path = Path(".") / ".idseconfig.json"
+        notion_url = (
+            "https://www.notion.so/workspace/Agent-Spec-Compiler-"
+            "123456781234123412341234567890ab"
+            "?v=abcdefab-cdef-abcd-efab-cdefabcdefab"
+        )
+
+        result = runner.invoke(
+            main,
+            ["sync", "--config", str(config_path), "setup"],
+            input=f"notion\n{notion_url}\n/tmp/mcp_credentials\n",
+        )
+        assert result.exit_code == 0
+
+        cfg = json.loads(config_path.read_text())
+        assert cfg["sync_backend"] == "notion"
+        assert cfg["notion"]["database_id"] == "123456781234123412341234567890ab"
+        assert cfg["notion"]["database_view_id"] == "abcdefabcdefabcdefabcdefabcdefab"
+        assert cfg["notion"]["database_view_url"] == "view://abcdefabcdefabcdefabcdefabcdefab"

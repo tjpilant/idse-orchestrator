@@ -14,9 +14,9 @@ class NotionDesignStore(MCPDesignStoreAdapter):
     """Notion-backed DesignStore using the Notion MCP server."""
 
     DEFAULT_TOOL_NAMES = {
-        "query_database": "notion-query-database",
+        "query_database": "notion-query-database-view",
         "fetch_page": "notion-fetch",
-        "create_page": "notion-create-page",
+        "create_page": "notion-create-pages",
         "update_page": "notion-update-page",
         "append_children": "append_block_children",
         "update_data_source": "notion-update-data-source",
@@ -53,7 +53,7 @@ class NotionDesignStore(MCPDesignStoreAdapter):
     ):
         self.database_id = database_id
         self.database_view_id = database_view_id
-        self.database_view_url = database_view_url
+        self.database_view_url = _normalize_view_url(database_view_url)
         self.parent_data_source_url = parent_data_source_url
         self.data_source_id = data_source_id
         self.debug = False
@@ -1032,6 +1032,28 @@ def _extract_id_from_notion_url(url: str) -> Optional[str]:
     if len(tail) == 32 and all(c in "0123456789abcdefABCDEF" for c in tail):
         return tail
     return None
+
+
+def _normalize_view_url(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return value
+    raw = value.strip()
+    if raw.startswith("view://"):
+        return raw
+    # Accept bare UUID for convenience.
+    compact = raw.replace("-", "")
+    if len(compact) == 32 and all(c in "0123456789abcdefABCDEF" for c in compact):
+        return f"view://{compact}"
+    # Accept full Notion URLs with ?v=<view_id>.
+    if "?v=" in raw:
+        try:
+            view_part = raw.split("?v=", 1)[1].split("&", 1)[0]
+            compact = view_part.replace("-", "")
+            if len(compact) == 32 and all(c in "0123456789abcdefABCDEF" for c in compact):
+                return f"view://{compact}"
+        except Exception:
+            return raw
+    return raw
 
 
 def _format_stage_value(stage: str) -> str:
