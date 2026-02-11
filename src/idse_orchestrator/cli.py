@@ -1617,7 +1617,15 @@ def compile():
 @click.option("--blueprint", default="__blueprint__", help="Blueprint session for defaults")
 @click.option("--out", type=click.Path(), help="Output directory")
 @click.option("--dry-run", is_flag=True, help="Validate and print without writing")
-def compile_agent_spec_cmd(project: Optional[str], session_id: str, blueprint: str, out: Optional[str], dry_run: bool):
+@click.pass_context
+def compile_agent_spec_cmd(
+    ctx,
+    project: Optional[str],
+    session_id: str,
+    blueprint: str,
+    out: Optional[str],
+    dry_run: bool,
+):
     """Compile AgentProfileSpec from spec.md."""
     from .compiler import compile_agent_spec
 
@@ -1628,6 +1636,7 @@ def compile_agent_spec_cmd(project: Optional[str], session_id: str, blueprint: s
             blueprint_id=blueprint,
             out_dir=Path(out) if out else None,
             dry_run=dry_run,
+            backend=ctx.obj.get("backend_override"),
         )
         if dry_run:
             click.echo(output)

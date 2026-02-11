@@ -25,10 +25,8 @@ class ValidationEngine:
         "[Summary of implementation work]",
         "[Test results, coverage, linting]",
         "[Any changes from the original plan, with justification]",
-        "ComponentName",
-        "NewComponentName",
-        "PrimitiveA",
-        "[List files that don't map to tracked components]",
+        "ExampleComponent",
+        "PrimitiveName",
     ]
 
     def validate_project(

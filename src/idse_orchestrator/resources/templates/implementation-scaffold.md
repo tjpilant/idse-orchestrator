@@ -22,20 +22,15 @@ Created: {{ timestamp }}
 
 ## Component Impact Report
 
-### Modified Components
-- **ComponentName** (source_module.py)
-  - Parent Primitives: PrimitiveA, PrimitiveB
-  - Type: Projection/Operation/Infrastructure/Routing
-  - Changes: [brief description]
+<!-- Use bullet format below. DO NOT use markdown tables — the validation engine
+     requires entries as `- **Name**` bullets. Each entry on a single line. -->
+
+- **ExampleComponent** (`src/module.py`) — Modified — Operation — Parent: `PrimitiveName`
 
 ### New Components Created
-- **NewComponentName** (source_module.py)
-  - Parent Primitive: PrimitiveA
-  - Type: Operation
-  - Purpose: [one-line description]
-  - Area: [Foundation/Core Loop/Platform/Validation/Governance/Artifacts/Sync/Storage/Coordination/CLI/Compilation]
-  - Layer: IDSE
-  - Milestone: MVP
+
+- None
 
 ### Files Edited (no component mapping)
-- [List files that don't map to tracked components]
+
+- None

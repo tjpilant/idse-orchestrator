@@ -1,17 +1,17 @@
 {
   "project_name": "idse-orchestrator",
-  "session_id": "component-impact-parser",
-  "is_blueprint": false,
+  "session_id": "__blueprint__",
+  "is_blueprint": true,
   "stages": {
-    "intent": "completed",
-    "context": "completed",
-    "spec": "completed",
-    "plan": "completed",
-    "tasks": "completed",
-    "implementation": "completed",
-    "feedback": "completed"
+    "intent": "pending",
+    "context": "pending",
+    "spec": "pending",
+    "plan": "pending",
+    "tasks": "pending",
+    "implementation": "pending",
+    "feedback": "pending"
   },
-  "last_sync": "2026-02-10T04:18:06.209021",
-  "validation_status": "passing",
-  "created_at": "2026-02-10T03:34:20.335627"
+  "last_sync": null,
+  "validation_status": "unknown",
+  "created_at": "2026-02-10T03:29:40.860580"
 }

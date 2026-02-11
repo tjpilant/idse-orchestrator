@@ -18,12 +18,14 @@ This document tracks all sessions spawned from this Blueprint.
 | sqlite-cms-refactor | feature | complete | system | 2026-02-04 | 100% |
 | notion-designstore-refactor | feature | complete | tjpilant | 2026-02-07 | 100% |
 | item8-test-session | feature | draft | system | 2026-02-09 | 0% |
-| component-impact-parser | feature | complete | system | 2026-02-10 | 0% |
+| component-impact-parser | feature | complete | system | 2026-02-10 | 100% |
+| agent-spec-compiler | feature | complete | system | 2026-02-10 | 100% |
 
 ## Lineage Graph
 
 ```
 __blueprint__ (root)
+├── agent-spec-compiler
 ├── component-impact-parser
 ├── designstore-file-artifacts
 ├── item8-test-session
@@ -48,18 +50,21 @@ Feedback from Feature Sessions flows upward to inform Blueprint updates.
 - `notion-designstore-refactor`: Enhanced blueprint metadata rollup to include delivery and feedback lessons from SQLite artifacts.; Hardened markdown section extraction to support `#`, `##`, `###`, and `Executive Summary` variants.; Refactored backend semantics: SQLite is now treated as storage core while sync uses a separate `sync_backend`.; Added session metadata management commands to avoid direct JSON edits:; `idse session set-owner`
 - `item8-test-session`: **ComponentName** (source_module.py); Parent Primitives: PrimitiveA, PrimitiveB; Type: Projection/Operation/Infrastructure/Routing; Changes: [brief description]; **NewComponentName** (source_module.py)
 - `component-impact-parser`: Updated validation engine to enforce implementation artifact quality:; `src/idse_orchestrator/validation_engine.py`; `implementation.md` is validated as a first-class artifact.; Placeholder markers now fail validation.; `Component Impact Report` section and component entries are required.
+- `agent-spec-compiler`: `SessionLoader` now supports backend-aware loading.; SQLite is the primary source when backend is `sqlite`.; Filesystem is used as an explicit backend or fallback when SQLite is unavailable.; CLI global `--backend` now flows into `compile agent-spec`.; Reviewed all 7 compiler modules under `src/idse_orchestrator/compiler/`.
 
 ## Feedback & Lessons Learned
 
 - `sqlite-cms-refactor`: Stored project state as JSON in SQLite for parity with legacy `session_state.json`.; Clarify defaults: SQLite is default for new projects; filesystem is legacy/explicit opt-in.; Session state file should become a generated view of CURRENT_SESSION state from SQLite.
 - `notion-designstore-refactor`: **MCP Parameter Discovery**: Use `mcp_github` tools for code, but rely on `describe` or direct schema fetches for Notion. The Notion API shapes for `parent` (needs explicit `type: database_id`) and...; **Status Property Shape**: Notion's `status` property is an object, not a simple string. Flattening payloads for `create_page` vs `update_page` required distinct handling.; **Fallback Parent Format**: The initial implementation assumed `parent: { database_id: ... }` was sufficient, but `parent: { type: "database_id", database_id: ... }` is strictly required.
 - `component-impact-parser`: Decision: Keep enforcement guardrails; do not reintroduce parser/database component-sync feature in this session.; Decision: Accept implementation report as sufficient session output for governance and handoff.; Decision: Storage-side agents own operational use of report data post-closeout.
+- `agent-spec-compiler`: Decision: SQLite is primary compiler source when backend is `sqlite`.; Rationale: aligns with project invariant that SQLite is the source of truth.; Decision: fallback to filesystem when SQLite path is unavailable.; Rationale: preserves operability for partial/local setups and migration windows.; Decision: CLI global `--backend` must be propagated to `compile agent-spec`.
 
 ## Blueprint Promotion Record
 
 - Date: 2026-02-08T04:54:05.757638
   Promoted Claim: IDSE Orchestrator is the design-time Documentation OS for project intent and delivery.
   Classification: non_negotiable_constraint
+  Origin: converged
   Source Sessions: __blueprint__, designstore-file-artifacts
   Source Stages: context, intent
   Feedback Artifacts: idse-orchestrator::__blueprint__::feedback, idse-orchestrator::designstore-file-artifacts::feedback
@@ -68,6 +73,7 @@ Feedback from Feature Sessions flows upward to inform Blueprint updates.
 - Date: 2026-02-08T04:50:57.556902
   Promoted Claim: SQLite is the authoritative storage backend for project artifacts.
   Classification: invariant
+  Origin: converged
   Source Sessions: notion-designstore-refactor, sqlite-cms-refactor
   Source Stages: feedback, spec
   Feedback Artifacts: idse-orchestrator::notion-designstore-refactor::feedback, idse-orchestrator::sqlite-cms-refactor::feedback
@@ -76,6 +82,7 @@ Feedback from Feature Sessions flows upward to inform Blueprint updates.
 - Date: 2026-02-08T04:29:31.463611
   Promoted Claim: SQLite is the default storage backend for project artifacts.
   Classification: invariant
+  Origin: converged
   Source Sessions: notion-designstore-refactor, sqlite-cms-refactor
   Source Stages: feedback, spec
   Feedback Artifacts: idse-orchestrator::notion-designstore-refactor::feedback, idse-orchestrator::sqlite-cms-refactor::feedback
@@ -89,11 +96,11 @@ Feedback from Feature Sessions flows upward to inform Blueprint updates.
 ## Meta Narrative
 
 <!-- BEGIN CUSTOM NARRATIVE -->
-Use this section for high-detail blueprint context that should survive metadata regeneration.
-- Architecture rationale
-- Cross-session decisions
-- Risks and mitigation notes
+### Known Gaps
+
+- **`idse init --force`**: No way to restart a partial init (e.g., Ctrl-C during `--guided`). `init_project()` raises `ValueError` if project dir exists. Need either `--force` flag on init, an `idse destroy <project>` command, or partial-init detection with resume/restart.
+- **CURRENT_SESSION drift**: Session pointer can revert to a stale value after branch switches or DB state changes. The file and DB pointer need better synchronization guards.
 <!-- END CUSTOM NARRATIVE -->
 
 ---
-*Last updated: 2026-02-10T05:01:17.935428*
+*Last updated: 2026-02-11T03:35:38.102902*

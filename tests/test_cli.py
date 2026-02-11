@@ -816,3 +816,26 @@ def test_cli_blueprint_demote_and_claims(tmp_path):
         )
         assert demote.exit_code == 0
         assert "Demoted claim" in demote.output
+
+
+def test_cli_compile_agent_spec_passes_backend_override(tmp_path, monkeypatch):
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        captured = {}
+
+        def fake_compile_agent_spec(**kwargs):
+            captured.update(kwargs)
+            return "id: demo\nname: Demo\n"
+
+        monkeypatch.setattr(
+            "idse_orchestrator.compiler.compile_agent_spec",
+            fake_compile_agent_spec,
+        )
+
+        result = runner.invoke(
+            main,
+            ["--backend", "sqlite", "compile", "agent-spec", "--session", "s1", "--dry-run"],
+        )
+
+        assert result.exit_code == 0
+        assert captured["backend"] == "sqlite"

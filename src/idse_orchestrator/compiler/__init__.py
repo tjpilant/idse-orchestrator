@@ -15,9 +15,14 @@ def compile_agent_spec(
     blueprint_id: str = "__blueprint__",
     out_dir: Optional[Path] = None,
     dry_run: bool = False,
+    backend: Optional[str] = None,
 ):
     project_root = resolve_project_root(project)
-    loader = SessionLoader(project_root)
+    loader = SessionLoader(
+        project_root,
+        project_name=project or project_root.name,
+        backend=backend,
+    )
 
     blueprint_md = loader.load_spec(blueprint_id)
     feature_md = loader.load_spec(session_id)
@@ -27,9 +32,9 @@ def compile_agent_spec(
 
     merged = merge_profiles(blueprint_profile, feature_profile)
 
-    # Attach provenance if not provided
-    merged.setdefault("source_session", session_id)
-    merged.setdefault("source_blueprint", blueprint_id)
+    # Attach explicit provenance for the compiled feature profile.
+    merged["source_session"] = session_id
+    merged["source_blueprint"] = blueprint_id
 
     if dry_run:
         return render_profile(merged)
