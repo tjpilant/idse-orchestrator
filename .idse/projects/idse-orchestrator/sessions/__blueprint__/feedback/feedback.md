@@ -29,6 +29,7 @@
 - Confirm Notion database select options remain aligned with stage normalization (Owner: IDSE Orchestrator, Status: ongoing).
 - Maintain a known-good Notion schema template for IDSE Artifacts (Owner: IDSE Orchestrator, Status: ongoing).
 - Add a lightweight checklist for MCP tool schema verification on new backends (Owner: IDSE Orchestrator, Status: planned).
+- Completed hotfix: preserve existing Notion `tool_names` during `idse sync setup` and normalize/store dashed UUID view IDs only (Owner: IDSE Orchestrator, Status: done).
 
 ## Decision Log
 - Chosen backend behavior: use DesignStore derivatives with MCP tooling rather than giving agents MCP access.
@@ -55,3 +56,16 @@
 
 6) **Debug mode was essential.**  
    Logging payloads and results exposed misaligned schemas and wrong parent types quickly.
+
+## Post-Timeout Resolution (2026-02-10)
+
+The timed-out implementation gap was closed with upstream code changes and tests:
+
+- Fixed stale Notion MCP defaults in package code.
+- Fixed setup overwrite behavior so `tool_names` overrides are preserved.
+- Fixed view ID formatting by normalizing to dashed UUIDs.
+- Prevented malformed `database_view_url` precedence by storing normalized `database_view_id` and letting runtime format view URLs.
+
+Result:
+- Setup now generates stable Notion config for current MCP tools.
+- Query payloads now use canonical `view://<dashed-uuid>` values.

@@ -735,6 +735,17 @@ def setup(ctx):
             notion_cfg.pop("view_url", None)
         config.config["notion"] = notion_cfg
 
+    # Ask where to save: project-local or global
+    idse_dir = Path.cwd() / ".idse"
+    if idse_dir.exists():
+        save_local = click.confirm(
+            "Save config to project (.idse/.idseconfig.json)? "
+            "Otherwise saves to ~/.idseconfig.json",
+            default=True,
+        )
+        if save_local:
+            config.config_path = idse_dir / ".idseconfig.json"
+
     config.save()
     click.echo(f"✅ Saved config to {config.config_path}")
 

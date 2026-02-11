@@ -115,6 +115,29 @@ Stage select values must be:
 - `idse sync tools --schema` dumps MCP tool schemas.
 - `idse sync push --yes --debug` shows payloads and MCP results.
 
+## Post-Timeout Hotfix (2026-02-10)
+
+This section records work completed after an interrupted implementation run.
+
+- Updated Notion MCP default tool names in package code:
+  - `query_database`: `notion-query-database-view`
+  - `create_page`: `notion-create-pages`
+- Hardened `idse sync setup` Notion flow:
+  - Accepts Notion URL input and extracts database/view IDs
+  - Preserves existing `notion` config keys (including `tool_names`) instead of overwriting
+  - Stores canonical dashed UUIDs for `database_id` and `database_view_id`
+  - Removes setup-time `database_view_url` persistence to avoid precedence bugs from malformed values
+- Normalized Notion view URL handling in runtime:
+  - Supports `view://`, bare UUID, and URL `?v=` input
+  - Canonicalizes to `view://<dashed-uuid>`
+
+Validation executed:
+- `pytest tests/test_cli.py -k "sync_setup_notion or notion_sync_target"` passed
+- `pytest tests/test_design_store_notion.py -k "normalize_view_url_uses_dashed_uuid"` passed
+
+Commit synced to `main`:
+- `5db9c5a` — Preserve Notion tool overrides and normalize dashed view IDs
+
 ## Boundary: Pipeline Docs vs File Artifacts
 
 Meta and Implementation files are pipeline artifacts and belong here.  

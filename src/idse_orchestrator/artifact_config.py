@@ -13,11 +13,26 @@ class ArtifactConfig:
     """Loads and manages Artifact Core backend configuration."""
 
     DEFAULT_PATH = Path.home() / ".idseconfig.json"
+    LOCAL_CONFIG_NAME = ".idseconfig.json"
 
     def __init__(self, config_path: Optional[Path] = None, backend_override: Optional[str] = None):
-        self.config_path = config_path or self.DEFAULT_PATH
+        self.config_path = config_path or self._resolve_config_path()
         self.backend_override = backend_override
         self.config = self._load()
+
+    @classmethod
+    def _resolve_config_path(cls) -> Path:
+        """
+        Resolve config path with per-project priority.
+
+        Resolution order:
+        1. .idse/.idseconfig.json (project-local)
+        2. ~/.idseconfig.json (global fallback)
+        """
+        local_candidate = Path.cwd() / ".idse" / cls.LOCAL_CONFIG_NAME
+        if local_candidate.exists():
+            return local_candidate
+        return cls.DEFAULT_PATH
 
     def _load(self) -> Dict[str, Any]:
         if self.config_path.exists():

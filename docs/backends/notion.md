@@ -22,18 +22,57 @@ Stages should align with IDSE stages (intent, context, spec, plan, tasks, implem
 
 ## Configuration
 
-Add to `~/.idseconfig.json`:
+### Per-Project vs Global Config
+
+IDSE supports two config locations:
+
+1. **Project-local** (recommended): `.idse/.idseconfig.json` — Each project has its own Notion database and credentials
+2. **Global fallback**: `~/.idseconfig.json` — Shared across all projects
+
+When you run `idse sync setup`, it will prompt whether to save to the project or globally. The config resolution order is:
+
+1. Explicit `--config` flag (highest priority)
+2. `.idse/.idseconfig.json` in current directory
+3. `~/.idseconfig.json` (global fallback)
+
+**Note**: `.idse/.idseconfig.json` is added to `.gitignore` by default since it contains project-specific database IDs and credential paths.
+
+### Setup via CLI
+
+Run the interactive setup:
+
+```bash
+idse sync setup
+```
+
+This will prompt for:
+- Sync backend (choose `notion`)
+- Notion database/view URL or database ID
+- Database view URL or view ID (optional but recommended)
+- Credentials directory (default: `./mnt/mcp_credentials`)
+- Save location (project-local or global)
+
+### Manual Configuration
+
+Alternatively, add to `.idse/.idseconfig.json` or `~/.idseconfig.json`:
 
 ```json
 {
-  "artifact_backend": "notion",
+  "storage_backend": "sqlite",
+  "sync_backend": "notion",
   "notion": {
     "database_id": "your-notion-database-id",
     "database_view_id": "optional-database-view-id",
-    "database_view_url": "optional-database-view-url",
-    "parent_data_source_url": "collection://your-data-source-id",
-    "data_source_id": "your-data-source-id",
-    "credentials_dir": "./mnt/mcp_credentials",
+    "credentials_dir": "./mnt/mcp_credentials"
+  }
+}
+```
+
+**Note**: The `tool_names` configuration is optional. IDSE defaults to current Notion MCP tool names (`notion-query-database-view`, `notion-create-pages`, etc.). Only override if your MCP server uses different tool names:
+
+```json
+{
+  "notion": {
     "tool_names": {
       "query_database": "notion-query-database-view",
       "create_page": "notion-create-pages",
