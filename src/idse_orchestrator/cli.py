@@ -699,31 +699,40 @@ def setup(ctx):
         config.config["sqlite"] = {"db_path": db_path}
 
     if backend == "notion":
+        notion_cfg = dict(config.config.get("notion", {}))
         target = click.prompt("Notion database/view URL or database ID")
         parsed = _parse_notion_sync_target(target)
-        database_id = parsed.get("database_id")
+        database_id = parsed.get("database_id") or _normalize_uuid(notion_cfg.get("database_id", ""))
         view_id = parsed.get("database_view_id")
         if not database_id:
-            database_id = click.prompt("Notion database ID")
+            database_id = _normalize_uuid(
+                click.prompt(
+                    "Notion database ID",
+                    default=notion_cfg.get("database_id", ""),
+                    show_default=bool(notion_cfg.get("database_id")),
+                )
+            )
         if not view_id:
             extra_view = click.prompt(
                 "Notion view URL or view ID (optional)",
-                default="",
-                show_default=False,
+                default=notion_cfg.get("database_view_id", ""),
+                show_default=bool(notion_cfg.get("database_view_id")),
             )
             if extra_view:
-                view_id = _parse_notion_sync_target(extra_view).get("database_view_id")
+                parsed_view = _parse_notion_sync_target(extra_view)
+                # In view prompt context, a bare UUID should be treated as a view id.
+                view_id = parsed_view.get("database_view_id") or parsed_view.get("database_id")
         credentials_dir = click.prompt(
             "Credentials directory",
-            default=str(Path.cwd() / "mnt" / "mcp_credentials"),
+            default=notion_cfg.get("credentials_dir", str(Path.cwd() / "mnt" / "mcp_credentials")),
         )
-        notion_cfg = {
-            "database_id": database_id,
-            "credentials_dir": credentials_dir,
-        }
+        notion_cfg["database_id"] = database_id
+        notion_cfg["credentials_dir"] = credentials_dir
         if view_id:
             notion_cfg["database_view_id"] = view_id
-            notion_cfg["database_view_url"] = f"view://{view_id}"
+            # Keep a single source for view identity; runtime formats view_url as needed.
+            notion_cfg.pop("database_view_url", None)
+            notion_cfg.pop("view_url", None)
         config.config["notion"] = notion_cfg
 
     config.save()
@@ -733,7 +742,11 @@ def setup(ctx):
 def _normalize_uuid(value: str) -> Optional[str]:
     compact = value.replace("-", "").strip()
     if len(compact) == 32 and all(ch in "0123456789abcdefABCDEF" for ch in compact):
-        return compact.lower()
+        compact = compact.lower()
+        return (
+            f"{compact[:8]}-{compact[8:12]}-{compact[12:16]}-"
+            f"{compact[16:20]}-{compact[20:]}"
+        )
     return None
 
 

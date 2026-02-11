@@ -52,7 +52,7 @@ class NotionDesignStore(MCPDesignStoreAdapter):
         mcp_config: Optional[Dict[str, Any]] = None,
     ):
         self.database_id = database_id
-        self.database_view_id = database_view_id
+        self.database_view_id = _normalize_uuid(database_view_id)
         self.database_view_url = _normalize_view_url(database_view_url)
         self.parent_data_source_url = parent_data_source_url
         self.data_source_id = data_source_id
@@ -1039,21 +1039,35 @@ def _normalize_view_url(value: Optional[str]) -> Optional[str]:
         return value
     raw = value.strip()
     if raw.startswith("view://"):
-        return raw
+        normalized = _normalize_uuid(raw.split("view://", 1)[1])
+        return f"view://{normalized}" if normalized else raw
     # Accept bare UUID for convenience.
-    compact = raw.replace("-", "")
-    if len(compact) == 32 and all(c in "0123456789abcdefABCDEF" for c in compact):
-        return f"view://{compact}"
+    normalized = _normalize_uuid(raw)
+    if normalized:
+        return f"view://{normalized}"
     # Accept full Notion URLs with ?v=<view_id>.
     if "?v=" in raw:
         try:
             view_part = raw.split("?v=", 1)[1].split("&", 1)[0]
-            compact = view_part.replace("-", "")
-            if len(compact) == 32 and all(c in "0123456789abcdefABCDEF" for c in compact):
-                return f"view://{compact}"
+            normalized = _normalize_uuid(view_part)
+            if normalized:
+                return f"view://{normalized}"
         except Exception:
             return raw
     return raw
+
+
+def _normalize_uuid(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    compact = str(value).replace("-", "").strip()
+    if len(compact) != 32 or not all(c in "0123456789abcdefABCDEF" for c in compact):
+        return None
+    compact = compact.lower()
+    return (
+        f"{compact[:8]}-{compact[8:12]}-{compact[12:16]}-"
+        f"{compact[16:20]}-{compact[20:]}"
+    )
 
 
 def _format_stage_value(stage: str) -> str:

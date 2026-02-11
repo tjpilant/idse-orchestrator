@@ -1,4 +1,8 @@
-from idse_orchestrator.design_store_notion import NotionDesignStore, NotionSchemaMap
+from idse_orchestrator.design_store_notion import (
+    NotionDesignStore,
+    NotionSchemaMap,
+    _normalize_view_url,
+)
 from idse_orchestrator.artifact_database import ArtifactDatabase, hash_content
 
 
@@ -26,6 +30,15 @@ def test_notion_property_helpers():
     }
     # Default config uses page_body content, so property text is ignored
     assert store._extract_property_text(page, "content") == ""
+
+
+def test_normalize_view_url_uses_dashed_uuid():
+    assert _normalize_view_url("5041d74b1dcb4a53a426668c72dacf3e") == (
+        "view://5041d74b-1dcb-4a53-a426-668c72dacf3e"
+    )
+    assert _normalize_view_url("view://5041d74b1dcb4a53a426668c72dacf3e") == (
+        "view://5041d74b-1dcb-4a53-a426-668c72dacf3e"
+    )
 
 
 def test_notion_text_type_normalizes():
@@ -614,4 +627,3 @@ def test_save_artifact_update_path_does_not_send_update_properties(monkeypatch):
         and payload.get("data", {}).get("command") == "update_properties"
     ]
     assert not prop_payloads
-

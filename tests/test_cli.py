@@ -845,16 +845,16 @@ def test_parse_notion_sync_target_extracts_database_and_view_ids():
     parsed = _parse_notion_sync_target(
         "https://www.notion.so/workspace/Agent-Spec-Compiler-123456781234123412341234567890ab?v=abcdefab-cdef-abcd-efab-cdefabcdefab"
     )
-    assert parsed["database_id"] == "123456781234123412341234567890ab"
-    assert parsed["database_view_id"] == "abcdefabcdefabcdefabcdefabcdefab"
+    assert parsed["database_id"] == "12345678-1234-1234-1234-1234567890ab"
+    assert parsed["database_view_id"] == "abcdefab-cdef-abcd-efab-cdefabcdefab"
 
 
 def test_parse_notion_sync_target_handles_view_scheme_and_uuid():
     parsed_db = _parse_notion_sync_target("12345678-1234-1234-1234-1234567890ab")
-    assert parsed_db["database_id"] == "123456781234123412341234567890ab"
+    assert parsed_db["database_id"] == "12345678-1234-1234-1234-1234567890ab"
 
     parsed_view = _parse_notion_sync_target("view://abcdefab-cdef-abcd-efab-cdefabcdefab")
-    assert parsed_view["database_view_id"] == "abcdefabcdefabcdefabcdefabcdefab"
+    assert parsed_view["database_view_id"] == "abcdefab-cdef-abcd-efab-cdefabcdefab"
 
 
 def test_sync_setup_notion_accepts_url_and_extracts_ids(tmp_path):
@@ -876,6 +876,59 @@ def test_sync_setup_notion_accepts_url_and_extracts_ids(tmp_path):
 
         cfg = json.loads(config_path.read_text())
         assert cfg["sync_backend"] == "notion"
-        assert cfg["notion"]["database_id"] == "123456781234123412341234567890ab"
-        assert cfg["notion"]["database_view_id"] == "abcdefabcdefabcdefabcdefabcdefab"
-        assert cfg["notion"]["database_view_url"] == "view://abcdefabcdefabcdefabcdefabcdefab"
+        assert cfg["notion"]["database_id"] == "12345678-1234-1234-1234-1234567890ab"
+        assert cfg["notion"]["database_view_id"] == "abcdefab-cdef-abcd-efab-cdefabcdefab"
+        assert "database_view_url" not in cfg["notion"]
+
+
+def test_sync_setup_notion_preserves_existing_tool_names(tmp_path):
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        config_path = Path(".") / ".idseconfig.json"
+        config_path.write_text(
+            json.dumps(
+                {
+                    "sync_backend": "notion",
+                    "notion": {
+                        "database_id": "12345678-1234-1234-1234-1234567890ab",
+                        "tool_names": {
+                            "query_database": "notion-query-database-view",
+                            "create_page": "notion-create-pages",
+                        },
+                    },
+                },
+                indent=2,
+            )
+        )
+
+        result = runner.invoke(
+            main,
+            ["sync", "--config", str(config_path), "setup"],
+            input="notion\n12345678-1234-1234-1234-1234567890ab\n\n/tmp/mcp_credentials\n",
+        )
+        assert result.exit_code == 0
+
+        cfg = json.loads(config_path.read_text())
+        assert cfg["notion"]["tool_names"]["query_database"] == "notion-query-database-view"
+        assert cfg["notion"]["tool_names"]["create_page"] == "notion-create-pages"
+
+
+def test_sync_setup_notion_view_prompt_accepts_bare_view_id(tmp_path):
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        config_path = Path(".") / ".idseconfig.json"
+
+        result = runner.invoke(
+            main,
+            ["sync", "--config", str(config_path), "setup"],
+            input=(
+                "notion\n"
+                "123456781234123412341234567890ab\n"
+                "5041d74b1dcb4a53a426668c72dacf3e\n"
+                "/tmp/mcp_credentials\n"
+            ),
+        )
+        assert result.exit_code == 0
+
+        cfg = json.loads(config_path.read_text())
+        assert cfg["notion"]["database_view_id"] == "5041d74b-1dcb-4a53-a426-668c72dacf3e"
