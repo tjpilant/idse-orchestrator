@@ -1,75 +1,94 @@
 # Implementation: idse-orchestrator
 
-Session: agent-spec-compiler
-Stack: python
-Created: 2026-02-10
+Session: agent-spec-compiler  
+Stack: python  
+Updated: 2026-02-12
 
 ## Architecture
 
-The existing compiler pipeline was retained (`load -> parse -> merge -> validate -> emit`) and hardened at the loader boundary:
+The compiler pipeline remains `load -> parse -> merge -> validate -> emit`. This implementation adds a Profiler pre-compiler layer:
 
-- `SessionLoader` now supports backend-aware loading.
-- SQLite is the primary source when backend is `sqlite`.
-- Filesystem is used as an explicit backend or fallback when SQLite is unavailable.
-- CLI global `--backend` now flows into `compile agent-spec`.
+`intake -> profiler schema validation -> enforcement heuristics -> deterministic mapper -> AgentProfileSpec JSON`
 
-No runtime LLM/API calls were introduced. Compilation remains deterministic and local.
+Profiler lives in `src/idse_orchestrator/profiler/` and is exposed by CLI commands:
+- `idse profiler intake`
+- `idse profiler export-schema`
 
 ## What Was Built
 
-### Phase 0 Audit
-- Reviewed all 7 compiler modules under `src/idse_orchestrator/compiler/`.
-- Verified no import/runtime issues in the existing pipeline.
-- Identified one additional issue during self-test: provenance fields in output were inherited from blueprint defaults (`source_session` could be `__blueprint__`).
-- Fixed by explicitly stamping compiled output provenance in `compile_agent_spec()`.
+1. Added Profiler package with explicit data contracts:
+- `models.py`: ObjectiveFunction, CoreTask, AuthorityBoundary, OutputContract, MissionContract, PersonaOverlay, AgentSpecProfilerDoc
+- `models.py`: ProfilerError, ProfilerRejection, ProfilerAcceptance
+- `error_codes.py`: 18 canonical error codes
 
-### Phase 1 Core Changes
-- Updated `SessionLoader.__init__()` to accept:
-  - `project_name`
-  - `backend`
-  - `idse_root`
-- Added SQLite path in loader:
-  - `ArtifactDatabase.load_artifact(project, session, "spec").content`
-- Added graceful filesystem fallback when SQLite path is unavailable.
-- Updated `compile_agent_spec()` to accept/pass `backend`.
-- Updated CLI compile command to pass global backend override from Click context.
+2. Added rules engine (`validate.py`) for enforcement heuristics:
+- Generic objective language detection
+- Multi-objective transformation detection
+- Measurability checks for success metrics
+- Structural checks for exclusions/constraints/failures and output contract requirements
 
-### Phase 2 Tests
-Added new compiler tests:
-- SQLite-backed loader test.
-- SQLite-unavailable filesystem fallback test.
-- End-to-end compilation test (SQLite input -> validated YAML output).
-- Validation failure test for missing required fields.
-- Additional merge behavior test for blueprint defaults + feature overrides.
-- CLI test for backend propagation into compiler call.
+3. Added deterministic mapper:
+- `map_to_agent_profile_spec.py::to_agent_profile_spec()`
+- No inference, direct field mapping from profiler doc to AgentProfileSpec-shaped output
+
+4. Added interactive intake workflow:
+- `profiler/cli.py` collects the 20-question flow
+- Produces `ProfilerRejection` with `errors + next_questions` or `ProfilerAcceptance`
+
+5. Added schema export:
+- `schema.py::export_profiler_json_schema()`
+- CLI `idse profiler export-schema --out <path>`
+
+6. Added example profiler documents:
+- `src/idse_orchestrator/profiler/examples/restaurant_blog_writer.profiler.json`
+- `src/idse_orchestrator/profiler/examples/data_scientist.profiler.json`
+
+7. Added tests:
+- `tests/test_profiler/test_validate.py`
+- `tests/test_profiler/test_mapper.py`
+- `tests/test_profiler/test_cli_profiler.py`
 
 ## Validation Reports
 
 Commands executed:
-- `PYTHONPATH=src pytest tests/test_compiler/ -q`
-  - Result: `12 passed`
-- `PYTHONPATH=src pytest tests/test_cli.py -k "compile_agent_spec_passes_backend_override" -q`
-  - Result: `1 passed`
-- `PYTHONPATH=src python3 -m idse_orchestrator.cli compile agent-spec --session agent-spec-compiler --project idse-orchestrator --dry-run`
-  - Result: valid YAML emitted from this session's `## Agent Profile` block with correct provenance:
-    - `source_session: agent-spec-compiler`
-    - `source_blueprint: __blueprint__`
+- `PYTHONPATH=src pytest -q tests/test_profiler`
+  - Result: `11 passed`
+- `PYTHONPATH=src pytest -q tests/test_compiler tests/test_profiler tests/test_cli.py`
+  - Result: `48 passed`
+- `PYTHONPATH=src python3 -m idse_orchestrator.cli --help`
+  - Result: `profiler` command group listed in help output
 
 ## Deviations from Plan
 
-- No architecture deviations.
-- Scope expansion (minor): fixed provenance stamping bug discovered during self-test to ensure output correctness.
+- No architectural deviations.
+- JSON Schema export was implemented (optional phase) to complete Phase 8 scope.
 
-## Component Impact Report
+## Component Declarations
 
-- **SessionLoader** (`src/idse_orchestrator/compiler/loader.py`) — Modified — Operation — Parent: `DocToAgentProfileSpecCompiler`
-- **compile_agent_spec** (`src/idse_orchestrator/compiler/__init__.py`) — Modified — Operation — Parent: `DocToAgentProfileSpecCompiler`
-- **CLI compile agent-spec** (`src/idse_orchestrator/cli.py`) — Modified — Routing — Parent: `CLIInterface`
-- **Compiler test suite** (`tests/test_compiler/test_loader.py`, `tests/test_compiler/test_pipeline.py`, `tests/test_compiler/test_merger.py`) — Modified/Created — Artifact — Parent: `DocToAgentProfileSpecCompiler`
-- **CLI test** (`tests/test_cli.py`) — Modified — Artifact — Parent: `CLIInterface`
+| Component | Action | Type | Parent Primitive |
+|---|---|---|---|
+| `ProfilerModels` (`src/idse_orchestrator/profiler/models.py`) | Created | Operation | `DocToAgentProfileSpecCompiler` |
+| `ProfilerErrorCodes` (`src/idse_orchestrator/profiler/error_codes.py`) | Created | Operation | `DocToAgentProfileSpecCompiler` |
+| `ProfilerValidationEngine` (`src/idse_orchestrator/profiler/validate.py`) | Created | Operation | `DocToAgentProfileSpecCompiler` |
+| `ProfilerMapper` (`src/idse_orchestrator/profiler/map_to_agent_profile_spec.py`) | Created | Operation | `DocToAgentProfileSpecCompiler` |
+| `ProfilerSchemaExport` (`src/idse_orchestrator/profiler/schema.py`) | Created | Infrastructure | `DocToAgentProfileSpecCompiler` |
+| `ProfilerIntakeCLI` (`src/idse_orchestrator/profiler/cli.py`) | Created | Routing | `CLIInterface` |
+| `CLI profiler commands` (`src/idse_orchestrator/cli.py`) | Modified | Routing | `CLIInterface` |
+| `Profiler tests` (`tests/test_profiler/*`) | Created | Artifact | `DocToAgentProfileSpecCompiler` |
 
-### New Components Created
-- None
+## Files Touched
 
-### Files Edited (no component mapping)
+- `src/idse_orchestrator/cli.py`
+- `src/idse_orchestrator/profiler/__init__.py`
+- `src/idse_orchestrator/profiler/error_codes.py`
+- `src/idse_orchestrator/profiler/models.py`
+- `src/idse_orchestrator/profiler/validate.py`
+- `src/idse_orchestrator/profiler/map_to_agent_profile_spec.py`
+- `src/idse_orchestrator/profiler/cli.py`
+- `src/idse_orchestrator/profiler/schema.py`
+- `src/idse_orchestrator/profiler/examples/restaurant_blog_writer.profiler.json`
+- `src/idse_orchestrator/profiler/examples/data_scientist.profiler.json`
+- `tests/test_profiler/test_validate.py`
+- `tests/test_profiler/test_mapper.py`
+- `tests/test_profiler/test_cli_profiler.py`
 - `.idse/projects/idse-orchestrator/sessions/agent-spec-compiler/implementation/README.md`

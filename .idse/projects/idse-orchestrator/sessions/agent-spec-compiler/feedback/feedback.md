@@ -1,39 +1,29 @@
 # Feedback
 
 ## External / Internal Feedback
-- Internal implementation validation completed on 2026-02-10.
-- Compiler hardening goals were met with SQLite-first loading and deterministic fallback behavior.
-
-## Impacted Artifacts
-- Intent: no changes
-- Context: no changes
-- Spec: no changes
-- Plan / Test Plan: no changes
-- Tasks / Implementation: completed per tasks; implementation and feedback artifacts populated
+- Profiler implementation completed for phases 4-9 scope in this session.
+- Existing compiler behavior was left intact; new functionality is additive under `idse profiler`.
 
 ## Risks / Issues Raised
-- SQLite path availability varies by environment (missing DB, missing project records).
-  - Mitigation: filesystem fallback in `SessionLoader` for resilience.
-- Provenance drift risk if blueprint defaults include provenance keys.
-  - Mitigation: explicit provenance stamping in `compile_agent_spec()`.
+- Current measurability and multi-objective checks are heuristics; some edge cases can produce false positives/negatives.
+- `idse profiler intake` currently emits mapped JSON and does not auto-write back into `spec.md` Agent Profile block.
+- Mapper output includes extended fields that are not part of the current strict `AgentProfileSpec` Pydantic model used by compiler emission.
 
 ## Actions / Follow-ups
-- Action: added SQLite loader tests and end-to-end compiler tests.
-  - Owner: implementation agent
-  - Status: completed
-- Action: keep AgentProfileSpec schema/version synchronized with downstream PromptBraining expectations.
+- Action: Add configurable phrase lists/rules to reduce heuristic false positives.
   - Owner: maintainers
   - Status: open
-- Action: consider promoting runtime schema contract docs into shared consumer-facing reference.
+- Action: Add optional command to patch accepted intake output into `spec.md` fenced YAML block.
+  - Owner: maintainers
+  - Status: open
+- Action: Decide whether compiler `AgentProfileSpec` model should be extended to include profiler-produced fields.
   - Owner: maintainers
   - Status: open
 
 ## Decision Log
-- Decision: SQLite is primary compiler source when backend is `sqlite`.
-  - Rationale: aligns with project invariant that SQLite is the source of truth.
-- Decision: fallback to filesystem when SQLite path is unavailable.
-  - Rationale: preserves operability for partial/local setups and migration windows.
-- Decision: CLI global `--backend` must be propagated to `compile agent-spec`.
-  - Rationale: consistent backend behavior across commands.
-- Decision: compiler output provenance is explicitly set (`source_session`, `source_blueprint`).
-  - Rationale: prevents inherited defaults from misreporting source session.
+- Decision: Implement profiler as separate pre-compiler package (`src/idse_orchestrator/profiler/`) instead of folding into compiler package.
+  - Rationale: keeps deterministic compiler stable and isolates intake/enforcement concerns.
+- Decision: Return structured rejections with canonical codes plus `next_questions`.
+  - Rationale: aligns with type-checker style diagnostics and supports iterative intake correction.
+- Decision: Ship JSON Schema export command now (`idse profiler export-schema`).
+  - Rationale: enables UI/Notion form validation without coupling to CLI runtime.

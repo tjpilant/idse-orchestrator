@@ -1741,6 +1741,73 @@ def compile_agent_spec_cmd(
         sys.exit(1)
 
 
+@main.group()
+def profiler():
+    """Profiler intake and schema tools."""
+    pass
+
+
+@profiler.command("intake")
+@click.option("--out", type=click.Path(path_type=Path), help="Write accepted mapped JSON to path.")
+def profiler_intake_cmd(out: Optional[Path]):
+    """Run interactive Agent Spec Profiler intake."""
+    import json
+
+    from .profiler import (
+        ProfilerRejection,
+        collect_profiler_answers_interactive,
+        run_profiler_intake,
+    )
+
+    try:
+        payload = collect_profiler_answers_interactive()
+        result = run_profiler_intake(payload)
+
+        if isinstance(result, ProfilerRejection):
+            click.echo("❌ Profiler rejected input", err=True)
+            click.echo(
+                json.dumps(
+                    {
+                        "errors": [error.model_dump() for error in result.errors],
+                        "next_questions": result.next_questions,
+                    },
+                    indent=2,
+                ),
+                err=True,
+            )
+            sys.exit(1)
+
+        mapped = result.mapped_agent_profile_spec
+        if out:
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text(json.dumps(mapped, indent=2, sort_keys=True) + "\n")
+            click.echo(f"✅ Wrote mapped profile JSON: {out}")
+            return
+
+        click.echo(json.dumps(mapped, indent=2, sort_keys=True))
+    except Exception as e:
+        click.echo(f"❌ Error: {e}", err=True)
+        sys.exit(1)
+
+
+@profiler.command("export-schema")
+@click.option("--out", type=click.Path(path_type=Path), required=True, help="Output schema file path.")
+def profiler_export_schema_cmd(out: Path):
+    """Export AgentSpecProfilerDoc JSON Schema."""
+    import json
+
+    from .profiler import export_profiler_json_schema
+
+    try:
+        schema = export_profiler_json_schema()
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(schema, indent=2, sort_keys=True) + "\n")
+        click.echo(f"✅ Wrote profiler schema: {out}")
+    except Exception as e:
+        click.echo(f"❌ Error: {e}", err=True)
+        sys.exit(1)
+
+
 
 @main.group()
 def session():
