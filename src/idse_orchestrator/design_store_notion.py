@@ -851,7 +851,7 @@ class NotionSchemaMap:
         fields: Dict[str, Optional[str]] = {
             "session": session_id,
             "stage": _format_stage_value(stage),
-            "title": f"{_format_stage_value(stage)} – {session_id}",
+            "title": f"{session_id} – {_format_stage_value(stage)}",
             "status": self._map_status(session_status),
             "layer": self._derive_layer(tag_list),
             "run_scope": self._derive_run_scope(tag_list),

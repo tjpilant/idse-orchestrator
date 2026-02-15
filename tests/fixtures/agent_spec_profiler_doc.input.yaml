@@ -1,0 +1,56 @@
+schema_version: "1.0"
+mission_contract:
+  objective_function:
+    input_description: "Structured product requirements and constraints"
+    output_description: "Compiled prompt package with deterministic sections"
+    transformation_summary: "Transform structured requirements into deterministic prompt artifacts"
+  success_metric: "Generate a valid prompt package in under 60 seconds with zero schema errors"
+  explicit_exclusions:
+    - "No autonomous product decisions"
+    - "No external network retrieval during compilation"
+  core_tasks:
+    - task: "Normalize input specification"
+      method: "Apply deterministic field mapping and canonical ordering"
+    - task: "Compile prompt sections"
+      method: "Render section templates with validated inputs only"
+    - task: "Emit output bundle"
+      method: "Write versioned artifacts and validation report"
+  authority_boundary:
+    may:
+      - "Read local specification files"
+      - "Render local templates"
+      - "Write local build artifacts"
+    may_not:
+      - "Call external APIs"
+      - "Modify source requirements"
+  constraints:
+    - "Deterministic output for identical input"
+    - "Fail fast on invalid schema"
+    - "No hidden inference"
+  failure_conditions:
+    - "Missing required output sections"
+    - "Validation report indicates schema violation"
+  output_contract:
+    format_type: "hybrid"
+    required_sections:
+      - "intent"
+      - "context"
+      - "specification"
+      - "compiled_prompt"
+    required_metadata:
+      - "schema_version"
+      - "compiler_version"
+      - "build_timestamp"
+    validation_rules:
+      - "All required sections are present"
+      - "Output schema validates without errors"
+persona_overlay:
+  industry_context: "Prompt engineering toolchain"
+  tone: "Direct and implementation-focused"
+  detail_level: "High"
+  reference_preferences:
+    - "Internal architecture docs"
+    - "Versioned schema definitions"
+  communication_rules:
+    - "State assumptions explicitly"
+    - "Separate facts from recommendations"

@@ -138,6 +138,34 @@ Validation executed:
 Commit synced to `main`:
 - `5db9c5a` — Preserve Notion tool overrides and normalize dashed view IDs
 
+## Per-Project Config Support (2026-02-11)
+
+Added per-project configuration to prevent cross-project config bleed when using Notion sync.
+
+**Problem**: Global `~/.idseconfig.json` was shared across all IDSE projects. Running `idse sync setup` for project B would overwrite project A's Notion database config, causing new projects to inherit the wrong database ID and view URL.
+
+**Solution**: Config resolution now prioritizes project-local `.idse/.idseconfig.json`:
+1. Explicit `--config` flag (highest priority)
+2. `.idse/.idseconfig.json` (project-local)
+3. `~/.idseconfig.json` (global fallback)
+
+**Changes**:
+- `src/idse_orchestrator/artifact_config.py`: Added `_resolve_config_path()` classmethod for local-first resolution
+- `src/idse_orchestrator/cli.py`: Updated `idse sync setup` to prompt for save location (project vs global, defaults to project when `.idse/` exists)
+- `.gitignore`: Added `.idse/.idseconfig.json` to ignore project-specific credentials
+- `docs/backends/notion.md`: Documented per-project config pattern
+- `tests/test_artifact_config.py`: Added 3 tests for config resolution priority
+
+**Component Impact Report**:
+
+- **ArtifactConfig** (`src/idse_orchestrator/artifact_config.py`) — Modified — Operation — Parent: `ConfigurationStore`
+  - Added `LOCAL_CONFIG_NAME` constant
+  - Added `_resolve_config_path()` classmethod for local-first config discovery
+
+**Validation**:
+- All 143 tests pass
+- Manual verification: local config preferred when present, global fallback when absent
+
 ## Boundary: Pipeline Docs vs File Artifacts
 
 Meta and Implementation files are pipeline artifacts and belong here.  

@@ -204,77 +204,168 @@ AgentSpecProfilerDoc.persona_overlay
 - Persona overlay maps to persona field
 - Empty persona produces empty persona dict
 
-### Phase 6 — Profiler CLI Intake
+### Phase 5.5 — Profiler Document Generator
 
 **Component:**
-- Interactive CLI that prompts 20 questions sequentially
-- Collects mission_contract + persona_overlay
-- Validates via Pydantic + enforcement rules
-- Returns ProfilerRejection (with next_questions) or ProfilerAcceptance
+- `generate_spec_document.py` — generates complete IDSE spec.md from validated ProfilerDoc
 
-**20 Questions:**
+**Sub-components:**
+- `generate_intent_section(doc: AgentSpecProfilerDoc) -> str`
+  - Produces ## Intent with Goal, Problem/Opportunity, Stakeholders, Success Criteria
+  - Derived from objective_function + success_metric + industry_context
+  - Human-readable prose (like project charter)
+
+- `generate_context_section(doc: AgentSpecProfilerDoc) -> str`
+  - Produces ## Context with architectural constraints narrative
+  - Derived from authority_boundary + constraints + explicit_exclusions
+  - Explains "why these boundaries" (not just lists)
+
+- `generate_tasks_section(doc: AgentSpecProfilerDoc) -> str`
+  - Produces ## Tasks with core_tasks listed with methods
+  - Format: `- Task N — <task>` + `Method: <method>`
+
+- `generate_specification_section(doc: AgentSpecProfilerDoc) -> str`
+  - Produces ## Specification with:
+    - Overview (transformation_summary expanded to 2-3 sentences)
+    - Functional Requirements (FR-1..FR-N from core_tasks)
+    - Non-Functional Requirements (from constraints + output_contract)
+    - Acceptance Criteria (AC-1..AC-N from success_metric + validation_rules)
+    - Assumptions/Constraints/Dependencies (from constraints + explicit_exclusions)
+
+- `generate_agent_profile_yaml(doc: AgentSpecProfilerDoc) -> str`
+  - Produces ## Agent Profile YAML block
+  - Uses `to_agent_profile_spec()` + YAML serialization
+
+- `generate_complete_spec_md(doc: AgentSpecProfilerDoc) -> str`
+  - Orchestrates all above generators
+  - Assembles complete spec.md document
+
+**Files:**
+- `src/idse_orchestrator/profiler/generate_spec_document.py`
+
+**Tests:**
+- Each generator function produces non-empty output
+- Generated ## Intent includes all required subsections
+- Generated ## Specification includes numbered FR-N and AC-N requirements
+- Generated ## Agent Profile YAML validates against AgentProfileSpec schema
+- Complete spec.md can be parsed by existing `compile_agent_spec()` compiler
+- Generated prose reads like HR job description (not robotic templates)
+
+### Phase 6 — Profiler CLI 3-Phase Pipeline
+
+**Component:**
+- Interactive CLI that orchestrates **3 phases**: Intake → Validation → Document Generation
+- Implements complete "HR job analysis" workflow
+- Produces ready-to-compile spec.md file (not just JSON)
+
+**Phase 1: Intake (20 questions)**
+Mission Contract Questions (15):
 1. Input description
 2. Output description
 3. Transformation summary
 4. Success metric
-5-N. Explicit exclusions (list)
-N+1-M. Core tasks (list, max 8)
-M+1-P. Methods for each task
-P+1. Authority: may (list)
-P+2. Authority: may_not (list)
-P+3. Constraints (list)
-P+4. Failure conditions (list)
-P+5. Output format type
-P+6. Required sections (if narrative/hybrid)
-P+7. Required metadata
-P+8. Validation rules (list)
-P+9. Industry context (optional)
-P+10. Tone (optional)
-P+11. Detail level (optional)
-P+12. Reference preferences (optional)
-P+13. Communication rules (optional)
+5. Explicit exclusions (list)
+6-13. Core tasks (1-8, each with task + method)
+14. Authority: may (list)
+15. Authority: may_not (list)
+16. Constraints (list)
+17. Failure conditions (list)
+18. Output format type
+19. Required sections (if narrative/hybrid)
+20. Required metadata
+21. Validation rules (list)
+
+Persona Overlay Questions (5):
+22. Industry context (optional)
+23. Tone (optional)
+24. Detail level (optional)
+25. Reference preferences (optional)
+26. Communication rules (optional)
+
+**Phase 2: Validation ("Psychoanalysis")**
+- Pydantic schema validation
+- Enforcement rules engine (18 canonical error codes)
+- If rejected: show errors + next_questions, allow refinement
+- If accepted: proceed to Phase 3
+
+**Phase 3: Document Generation**
+- Call `generate_complete_spec_md(doc)`
+- Write to `.idse/agents/<agent-name>/specs/spec.md`
+- Display summary + path to user
 
 **Files:**
 - `src/idse_orchestrator/profiler/cli.py`
 - `src/idse_orchestrator/profiler/__init__.py`
+- Update `src/idse_orchestrator/cli.py` to wire `profiler` command group
 
-**CLI command:**
+**CLI commands:**
 ```bash
-idse profiler intake --out <path-to-output.json>
+# Interactive intake → validation → document generation
+idse profiler intake --agent-name <name> [--out-dir <dir>]
+
+# One-shot (intake + compile to .profile.yaml)
+idse profiler create-agent --name <name>
 ```
 
 **Tests:**
-- CLI completes full intake without crashes
-- Valid answers produce AgentProfileSpec JSON
-- Invalid answers show ProfilerRejection with errors + next_questions
+- CLI completes full 3-phase pipeline without crashes
+- Valid answers produce complete spec.md (not just JSON)
+- Invalid answers show ProfilerRejection with errors + next_questions, allow retry
+- Generated spec.md contains all sections (Intent, Context, Tasks, Specification, Agent Profile)
+- Generated spec.md can be fed to `idse compile agent-spec` without edits
 
 ### Phase 7 — Profiler Integration with Compiler
 
-**Flow:**
+**Complete Flow (Updated):**
 ```
-idse profiler intake
-  → collects 20 answers
-  → validates via Pydantic + rules
-  → if rejected: show errors + next_questions, exit
-  → if accepted: emit AgentProfileSpec JSON
-  → (optional) write to spec.md ## Agent Profile block
-  → idse compile agent-spec --session <id>
-  → .profile.yaml output
+idse profiler intake --agent-name code-reviewer
+  │
+  ├─ Phase 1: Collects 20 answers (mission_contract + persona_overlay)
+  │
+  ├─ Phase 2: Validation
+  │  ├─ Pydantic schema validation
+  │  ├─ Enforcement rules (18 error codes)
+  │  │
+  │  ├─ REJECTED → Show errors + next_questions, allow retry
+  │  └─ ACCEPTED → Continue
+  │
+  └─ Phase 3: Document Generation
+     ├─ generate_complete_spec_md(doc)
+     │  ├─ ## Intent (prose from objective_function)
+     │  ├─ ## Context (prose from authority_boundary + constraints)
+     │  ├─ ## Tasks (list from core_tasks with methods)
+     │  ├─ ## Specification (FR-N, AC-N)
+     │  └─ ## Agent Profile (YAML block)
+     │
+     └─ Write to .idse/agents/code-reviewer/specs/spec.md
+  │
+  ▼
+idse compile agent-spec --session code-reviewer
+  │
+  ├─ SessionLoader reads spec.md from SQLite or filesystem
+  ├─ parse_agent_profile() extracts ## Agent Profile YAML
+  ├─ merge_profiles() (if blueprint exists)
+  ├─ AgentProfileSpec validation
+  └─ emit_profile() → code-reviewer.profile.yaml
+  │
+  ▼
+ZPromptCompiler consumes .profile.yaml
 ```
 
-**Integration point:**
-- Profiler output (AgentProfileSpec dict) can be:
-  1. Written to spec.md ## Agent Profile YAML block (manual)
-  2. Fed directly to `compile_agent_spec()` (programmatic)
+**Key Integration Points:**
+1. Profiler writes complete spec.md (not just YAML snippet)
+2. No manual editing required between Profiler output and compiler input
+3. Existing compiler (`compile_agent_spec()`) works unchanged
+4. The spec.md contains embedded ## Agent Profile YAML block ready for parsing
 
 **Files:**
-- Update `src/idse_orchestrator/cli.py` to add `profiler` command group
-- Wire `profiler intake` subcommand
+- Already wired in Phase 6 CLI updates
 
 **Tests:**
-- End-to-end: profiler intake → validation → mapper → compiler → .profile.yaml
-- Profiler rejection blocks compilation
-- Profiler acceptance flows through to valid .profile.yaml
+- End-to-end: `profiler intake` → spec.md written → `compile agent-spec` → .profile.yaml
+- Profiler rejection prevents spec.md generation (no partial files)
+- Generated spec.md validates with existing compiler (no parse errors)
+- Round-trip: intake → spec.md → .profile.yaml produces valid AgentProfileSpec
 
 ### Phase 8 — JSON Schema Export (Optional)
 
@@ -309,3 +400,191 @@ idse profiler export-schema --out build/schemas/
 - Error code reference included
 - Examples directory has 2+ .profiler.json files
 - Self-test passes
+
+---
+
+### Phase 10 — Production Hardening (Adversarial Testing & Drift Detection)
+
+**Objective:**
+Harden the Profiler against adversarial inputs, add drift detection for manual spec.md edits, and ensure compile-time invariants are enforced.
+
+**Components:**
+
+1. **Schema Versioning & Hash-Based Drift Detection**
+   - Add `schema_version: str = "1.0"` to `AgentSpecProfilerDoc`
+   - Compute `profiler_hash` (SHA256 of normalized ProfilerDoc) in `generate_agent_profile_yaml()`
+   - Embed hash as YAML comment: `# profiler_hash: <sha256>`
+   - Add hash validation in `SessionLoader.load_spec()` — warn on missing/mismatched hash
+
+2. **Additional Error Codes (E1008, E1017, E1018, W2002)**
+   - `E1008` — `non_actionable_method` — Method is platitude ("best practices", "leverage AI")
+   - `E1017` — `scope_contradiction` — Exclusions contradict core_tasks or output_contract
+   - `E1018` — `output_contract_incoherent` — format_type conflicts with validation_rules
+   - `W2002` — `success_metric_not_locally_verifiable` — Metric needs tools agent doesn't have
+
+3. **Advanced Validation Rules**
+   - `_detect_scope_contradictions()` — Cross-check explicit_exclusions vs core_tasks vs output_contract
+   - `_detect_unverifiable_metrics()` — Check if success_metric requires tools not in authority_boundary.may
+   - `_detect_output_contract_incoherence()` — Validate format_type vs validation_rules consistency
+   - `_detect_non_actionable_methods()` — Flag methods with generic platitudes
+
+4. **Adversarial Test Suite (10 tests)**
+   - Test 1: **Vague Multi-Tasker** — Generic objective, multi-objective, non-measurable metric (E1001, E1002, E1004)
+   - Test 2: **Over-Scoped Agent** — 9 core tasks (E1006)
+   - Test 3: **Authority Hole** — Missing may_not (E1010)
+   - Test 4: **Valid Restaurant Blogger** — Golden path acceptance
+   - Test 5: **Non-Actionable Methods** — Platitude methods (E1008)
+   - Test 6: **Excessive Tasks** — Too many core tasks
+   - Test 7: **Generic Language** — Generic objective function
+   - Test 8: **Contradiction Spec** — Exclusions contradict tasks (E1017)
+   - Test 9: **Unverifiable Success** — Metric needs unavailable tools (W2002)
+   - Test 10: **Output Contract Mismatch** — json format with markdown validation (E1018)
+
+**Files:**
+- `src/idse_orchestrator/profiler/models.py` — add schema_version field
+- `src/idse_orchestrator/profiler/error_codes.py` — add 4 new error codes
+- `src/idse_orchestrator/profiler/validate.py` — add 4 new validation functions
+- `src/idse_orchestrator/profiler/generate_spec_document.py` — add profiler_hash computation
+- `src/idse_orchestrator/compiler/session_loader.py` — add hash validation
+- `tests/test_profiler/test_adversarial.py` — 10 adversarial tests
+- `src/idse_orchestrator/profiler/README.md` — document schema versioning and hash workflow
+
+**Acceptance:**
+- All 10 adversarial tests pass with correct error codes
+- Generated ## Agent Profile YAML includes profiler_hash comment
+- SessionLoader warns on hash mismatch
+- Schema versioning documented with v1.0 → v2.0 migration path
+- Error code reference updated with numeric IDs (E1000-E1018, W2001-W2002)
+
+---
+
+### Phase 10.5 — Profiler UX Enhancement (JSON I/O + CLI Refactoring)
+
+**Objective:**
+Fix critical UX gap (PFR-2 incomplete): enable users to save/load profiler answers as JSON to support edit-retry workflow when validation fails. Prevent forcing users to restart 20-question intake from scratch when only 1 answer needs correction.
+
+**Problem:**
+When profiler validation fails (e.g., E1002 multi_objective_agent on question 3), users must restart the entire 20-question intake. No mechanism exists to save collected answers, edit the failing field, and re-validate. This creates significant UX friction — discovered during manual testing when transformation summary failed validation after completing all 20 questions.
+
+**Solution:**
+
+1. **JSON I/O Functions** (`profiler/cli.py`):
+   - `save_profiler_answers_to_json(path, answers)` — serialize answers dict to JSON with sorted keys
+   - `load_profiler_answers_from_json(path)` — deserialize JSON, validate schema, return answers dict
+
+2. **CLI Flags** (update `profiler intake` command):
+   - `--save-answers <path>` — save collected answers to JSON **before** validation
+   - `--from-json <path>` — load answers from JSON, skip interactive prompts, validate and generate spec.md
+
+3. **Edit-Retry Workflow**:
+   ```bash
+   # First attempt: collect answers, save before validation
+   idse profiler intake --save-answers answers.json --spec-out agent.spec.md
+   # ❌ Profiler rejected input (E1002 multi_objective_agent)
+
+   # Edit answers.json to fix transformation_summary field
+   vim answers.json
+
+   # Retry: load edited JSON, re-validate
+   idse profiler intake --from-json answers.json --spec-out agent.spec.md
+   # ✅ Profiler accepted, spec.md generated
+   ```
+
+4. **CLI Refactoring** (prevent main CLI bloat):
+   - Extract profiler command group to `profiler/commands.py`
+   - Main `cli.py` imports and registers profiler commands
+   - Keeps main CLI under 1800 lines (currently ~1800, would exceed 2000 with JSON I/O additions)
+
+**Components:**
+
+**New Module:** `src/idse_orchestrator/profiler/commands.py`
+```python
+"""Profiler Click command group."""
+import click
+from pathlib import Path
+from typing import Optional
+
+from .cli import (
+    collect_profiler_answers_interactive,
+    run_profiler_intake,
+    load_profiler_answers_from_json,
+    save_profiler_answers_to_json,
+)
+
+@click.group()
+def profiler():
+    """Profiler intake and schema tools."""
+    pass
+
+@profiler.command("intake")
+@click.option("--from-json", type=click.Path(exists=True, path_type=Path))
+@click.option("--save-answers", type=click.Path(path_type=Path))
+@click.option("--out", type=click.Path(path_type=Path))
+@click.option("--spec-out", type=click.Path(path_type=Path))
+def profiler_intake_cmd(...):
+    # Phase 1: Intake
+    if from_json:
+        payload = load_profiler_answers_from_json(from_json)
+    else:
+        payload = collect_profiler_answers_interactive()
+        if save_answers:
+            save_profiler_answers_to_json(save_answers, payload)
+
+    # Phase 2: Validation
+    result = run_profiler_intake(payload)
+    if isinstance(result, ProfilerRejection):
+        # Show errors, exit 1
+        pass
+
+    # Phase 3: Document Generation
+    # ... existing code
+```
+
+**Updated Functions in `profiler/cli.py`:**
+```python
+def save_profiler_answers_to_json(path: Path, payload: Dict[str, Any]) -> None:
+    """Save profiler answers to JSON file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+
+def load_profiler_answers_from_json(path: Path) -> Dict[str, Any]:
+    """Load profiler answers from JSON file."""
+    payload = json.loads(path.read_text())
+    # Optional: Pydantic pre-validation to catch schema errors early
+    try:
+        AgentSpecProfilerDoc.model_validate(payload)
+    except PydanticValidationError as exc:
+        raise click.ClickException(f"Invalid JSON schema: {exc}")
+    return payload
+```
+
+**Main CLI Update** (`src/idse_orchestrator/cli.py`):
+```python
+# Remove profiler command definitions (move to profiler/commands.py)
+# Add import and registration:
+from .profiler.commands import profiler
+
+main.add_command(profiler, name="profiler")
+```
+
+**Files:**
+- `src/idse_orchestrator/profiler/cli.py` — add JSON save/load functions
+- `src/idse_orchestrator/profiler/commands.py` — NEW: profiler Click command group
+- `src/idse_orchestrator/cli.py` — update to import profiler commands from profiler/commands.py
+- `tests/test_profiler/test_cli_json_io.py` — NEW: test `--save-answers` and `--from-json` workflows
+- `src/idse_orchestrator/profiler/README.md` — document JSON I/O workflow
+
+**Tests:**
+1. `--save-answers` creates valid JSON file with all 20 answers
+2. `--from-json` loads JSON and validates correctly (same result as interactive mode)
+3. Edit-retry workflow: save → edit JSON → reload → validate (test with E1002 correction)
+4. Main CLI still under 1800 lines after refactoring
+5. All existing profiler tests still pass
+
+**Acceptance:**
+- `idse profiler intake --save-answers answers.json` creates valid JSON file
+- `idse profiler intake --from-json answers.json --spec-out agent.spec.md` generates spec.md without interactive prompts
+- Edit-retry workflow documented in README with example
+- Profiler command group moved to `profiler/commands.py`
+- Main `cli.py` under 1800 lines
+- All profiler tests pass (existing + new JSON I/O tests)

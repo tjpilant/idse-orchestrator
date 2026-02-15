@@ -145,6 +145,9 @@ class ProjectWorkspace:
         if is_blueprint:
             SessionGraph(project_path).create_blueprint_meta(project_path, project_name)
 
+        # Ensure project agent registry exists at bootstrap.
+        self._ensure_project_agent_registry(project_path)
+
         # Create agent instruction files if requested
         if create_agent_files:
             self._create_agent_instructions(project_name, stack)
@@ -191,7 +194,7 @@ class ProjectWorkspace:
             generator.generate_session_state(project_name, session_id)
             generator.generate_blueprint_meta(project_name)
             try:
-                registry_path = self._project_path(project_name) / "agent_registry.json"
+                registry_path = project_path / "agent_registry.json"
                 if registry_path.exists():
                     import json
 
@@ -202,6 +205,41 @@ class ProjectWorkspace:
                 pass
 
         return project_path
+
+    def _ensure_project_agent_registry(self, project_path: Path) -> None:
+        """Create default project agent registry when missing or empty."""
+        registry_path = project_path / "agent_registry.json"
+        default_registry = {
+            "agents": [
+                {
+                    "id": "gpt-codex",
+                    "role": "implementer",
+                    "mode": "implementation",
+                    "stages": ["implementation"],
+                },
+                {
+                    "id": "claude-code",
+                    "role": "orchestrator",
+                    "mode": "planning",
+                    "stages": ["intent", "context", "spec", "plan", "tasks", "feedback"],
+                },
+                {
+                    "id": "github-copilot",
+                    "role": "feedback-reviewer",
+                    "mode": "implementation",
+                    "stages": ["feedback"],
+                },
+            ]
+        }
+
+        if registry_path.exists():
+            try:
+                existing = json.loads(registry_path.read_text())
+                if existing.get("agents"):
+                    return
+            except Exception:
+                pass
+        registry_path.write_text(json.dumps(default_registry, indent=2) + "\n")
 
     def _cleanup_nested_idse(self, project_path: Path) -> None:
         """

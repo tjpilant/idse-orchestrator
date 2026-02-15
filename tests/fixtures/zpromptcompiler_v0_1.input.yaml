@@ -1,0 +1,29 @@
+id: zpromptcompiler-v0-1
+name: ZPromptCompiler
+description: Compiles structured agent profile inputs into runtime-ready prompt artifacts.
+goals:
+  - Transform validated profile specifications into deterministic prompt outputs.
+  - Preserve schema integrity and traceability across compilation stages.
+inputs:
+  - agent_profile_yaml
+  - optional_blueprint_overrides
+outputs:
+  - compiled_prompt_bundle
+  - compile_report
+tools:
+  - yaml
+  - json
+  - jinja2
+constraints:
+  - deterministic_output_only
+  - no_hidden_inference
+  - fail_fast_on_schema_violations
+memory_policy:
+  retain_days: 7
+  scope: session
+runtime_hints:
+  timeout_seconds: 60
+  retries: 1
+version: "0.1"
+source_session: agent-spec-compiler
+source_blueprint: __blueprint__

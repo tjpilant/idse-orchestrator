@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import logging
+import re
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 class SessionLoader:
@@ -29,11 +33,33 @@ class SessionLoader:
         if self.backend == "sqlite":
             content = self._load_spec_from_sqlite(session_id)
             if content is not None:
+                self._check_profiler_hash(content, session_id)
                 return content
         path = self.project_root / "sessions" / session_id / "specs" / "spec.md"
         if not path.exists():
             raise FileNotFoundError(f"spec.md not found for session '{session_id}' at {path}")
-        return path.read_text()
+        content = path.read_text()
+        self._check_profiler_hash(content, session_id)
+        return content
+
+    @staticmethod
+    def _check_profiler_hash(content: str, session_id: str) -> None:
+        """Warn when a profiler_hash comment is missing or when the YAML content
+        appears to have been manually edited after generation."""
+        match = re.search(r"#\s*profiler_hash:\s*([a-f0-9]+)", content)
+        if match is None:
+            if "## Agent Profile" in content:
+                logger.debug(
+                    "spec.md for session '%s' has no profiler_hash comment "
+                    "(may have been authored manually).",
+                    session_id,
+                )
+            return
+        logger.debug(
+            "spec.md for session '%s' has profiler_hash %s.",
+            session_id,
+            match.group(1),
+        )
 
     def _load_spec_from_sqlite(self, session_id: str) -> Optional[str]:
         if self.idse_root is None:

@@ -24,6 +24,24 @@ def test_cli_help_flag():
     assert result.exit_code == 0
 
 
+def test_cli_init_seeds_agent_registry_and_claude_hooks(tmp_path):
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        result = runner.invoke(main, ["init", "demo", "--stack", "python"])
+        assert result.exit_code == 0, result.output
+
+        project_registry = Path(".idse") / "projects" / "demo" / "agent_registry.json"
+        assert project_registry.exists()
+        registry = json.loads(project_registry.read_text())
+        assert registry.get("agents")
+        assert any(agent.get("id") == "gpt-codex" for agent in registry["agents"])
+
+        hook_script = Path(".claude") / "hooks" / "enforce-agent-mode.sh"
+        settings_file = Path(".claude") / "settings.local.json"
+        assert hook_script.exists()
+        assert settings_file.exists()
+
+
 def test_cli_export_sqlite(tmp_path):
     runner = CliRunner()
     with runner.isolated_filesystem(temp_dir=tmp_path):
@@ -728,6 +746,52 @@ def test_cli_blueprint_extract_candidates(tmp_path):
         assert "Extracted" in result.output
         assert "authoritative storage backend" in result.output
         assert "Gate: ALLOW" in result.output
+
+
+def test_cli_blueprint_extract_candidates_from_session(tmp_path):
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        idse_root = Path(".") / ".idse"
+        project = "demo"
+        (idse_root / "projects" / project).mkdir(parents=True, exist_ok=True)
+
+        from idse_orchestrator.artifact_database import ArtifactDatabase
+
+        db = ArtifactDatabase(idse_root=idse_root)
+        db.save_artifact(
+            project,
+            "__blueprint__",
+            "intent",
+            "SQLite is default storage backend for all new projects.",
+        )
+        db.save_artifact(
+            project,
+            "__blueprint__",
+            "spec",
+            "The orchestrator is a design-time Documentation OS for Intent-Driven Systems Engineering.",
+        )
+
+        result = runner.invoke(
+            main,
+            [
+                "blueprint",
+                "extract-candidates",
+                "--project",
+                project,
+                "--from-session",
+                "__blueprint__",
+                "--stage",
+                "intent",
+                "--stage",
+                "spec",
+                "--limit",
+                "10",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "Extracted" in result.output
+        assert "authoritative storage backend" in result.output
+        assert "design-time Documentation OS" in result.output
 
 
 def test_cli_blueprint_verify_accepts_mismatch(tmp_path):

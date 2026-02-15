@@ -15,6 +15,8 @@ from typing import Optional
 from datetime import datetime
 import sys
 import re
+import json
+import shutil
 from urllib.parse import parse_qs, urlparse
 
 from . import __version__
@@ -122,6 +124,8 @@ def init(ctx, project_name: str, stack: str, guided: bool, agentic: Optional[str
 
         if create_agent_files:
             click.echo(f"🤖 Agent instruction files created")
+            _install_claude_hooks(Path.cwd(), force=False, quiet=True)
+            click.echo("🪝 Claude hooks initialized (.claude/hooks)")
 
         # Install agentic framework if specified
         if agentic:
@@ -423,7 +427,7 @@ def sync(ctx, config_path: Optional[Path]):
 @sync.command()
 @click.option("--project", help="Project name (uses current if not specified)")
 @click.option("--session", "session_override", help="Session ID (uses CURRENT_SESSION if not specified)")
-@click.option("--yes", is_flag=True, help="Skip overwrite confirmation")
+@click.option("--yes", is_flag=True, help="Skip sync confirmation")
 @click.option("--debug", is_flag=True, help="Print MCP payloads")
 @click.option("--force-create", is_flag=True, help="Always create new pages (no upsert)")
 @click.pass_context
@@ -503,7 +507,7 @@ def push(ctx, project: Optional[str], session_override: Optional[str], yes: bool
             tracker = StageStateModel(project_path)
 
         if not yes and not click.confirm(
-            f"Overwrite remote artifacts for {project_name}/{session_id}?"
+            f"Proceed with sync push for {project_name}/{session_id}? (unchanged artifacts may be skipped)"
         ):
             click.echo("ℹ️  Sync push cancelled.")
             return
@@ -557,7 +561,7 @@ def push(ctx, project: Optional[str], session_override: Optional[str], yes: bool
 @sync.command()
 @click.option("--project", help="Project name (uses current if not specified)")
 @click.option("--session", "session_override", help="Session ID (uses CURRENT_SESSION if not specified)")
-@click.option("--yes", is_flag=True, help="Skip overwrite confirmation")
+@click.option("--yes", is_flag=True, help="Skip sync confirmation")
 @click.pass_context
 def pull(ctx, project: Optional[str], session_override: Optional[str], yes: bool):
     """
@@ -610,7 +614,7 @@ def pull(ctx, project: Optional[str], session_override: Optional[str], yes: bool
             tracker = StageStateModel(project_path)
 
         if not yes and not click.confirm(
-            f"Overwrite local artifacts for {project_name}/{session_id}?"
+            f"Proceed with sync pull for {project_name}/{session_id}? (unchanged artifacts may be skipped)"
         ):
             click.echo("ℹ️  Sync pull cancelled.")
             return
@@ -1012,6 +1016,89 @@ def agents():
     pass
 
 
+def _install_claude_hooks(project_root: Path, *, force: bool, quiet: bool) -> dict:
+    """Install/ensure Claude mode-enforcement hook and settings."""
+    pkg_root = Path(__file__).resolve().parent
+    hook_src = pkg_root / "resources" / "hooks" / "enforce-agent-mode.sh"
+    if not hook_src.exists():
+        raise FileNotFoundError("Bundled hook script not found.")
+
+    claude_dir = project_root / ".claude"
+    hooks_dir = claude_dir / "hooks"
+    if not claude_dir.exists():
+        if not quiet:
+            click.echo(f"⚠️  No .claude directory found at {project_root}. Creating it...")
+        claude_dir.mkdir(parents=True, exist_ok=True)
+
+    hooks_dir.mkdir(exist_ok=True)
+    target_script = hooks_dir / "enforce-agent-mode.sh"
+    script_installed = False
+    if not target_script.exists() or force:
+        shutil.copy2(hook_src, target_script)
+        target_script.chmod(0o755)
+        script_installed = True
+
+    settings_file = claude_dir / "settings.local.json"
+    settings = {}
+    if settings_file.exists():
+        try:
+            settings = json.loads(settings_file.read_text())
+        except json.JSONDecodeError:
+            if not quiet:
+                click.echo(f"⚠️  Warning: Could not parse {settings_file}. Starting with empty settings.")
+            settings = {}
+
+    settings.setdefault("hooks", {})
+    settings["hooks"].setdefault("PreToolUse", [])
+    existing_hooks = settings["hooks"]["PreToolUse"]
+
+    hook_configs = [
+        {
+            "matcher": "Edit|Write|MultiEdit",
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/enforce-agent-mode.sh",
+                }
+            ],
+        },
+        {
+            "matcher": "Bash",
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/enforce-agent-mode.sh",
+                }
+            ],
+        },
+    ]
+
+    settings_updated = False
+    for new_hook in hook_configs:
+        matcher = new_hook.get("matcher")
+        duplicate = False
+        for exist in existing_hooks:
+            if exist.get("matcher") != matcher:
+                continue
+            cmds = exist.get("hooks", [])
+            if any(h.get("command", "").endswith("enforce-agent-mode.sh") for h in cmds):
+                duplicate = True
+                break
+        if not duplicate:
+            existing_hooks.append(new_hook)
+            settings_updated = True
+
+    if settings_updated or not settings_file.exists():
+        settings_file.write_text(json.dumps(settings, indent=2))
+
+    return {
+        "script_installed": script_installed,
+        "settings_updated": settings_updated,
+        "script_path": target_script,
+        "settings_path": settings_file,
+    }
+
+
 @agents.command("install-hooks")
 @click.option("--force", is_flag=True, help="Overwrite existing hooks")
 @click.pass_context
@@ -1025,103 +1112,20 @@ def install_hooks(ctx, force: bool):
     Example:
         idse agents install-hooks
     """
-    import shutil
-    import json
-    from pathlib import Path
-    
-    # 1. Locate resource
-    pkg_root = Path(__file__).resolve().parent
-    hook_src = pkg_root / "resources" / "hooks" / "enforce-agent-mode.sh"
-    
-    if not hook_src.exists():
-        click.echo("❌ Error: Bundled hook script not found.", err=True)
+    try:
+        project_root = Path.cwd()
+        result = _install_claude_hooks(project_root, force=force, quiet=False)
+        if result["script_installed"]:
+            click.echo(f"✅ Installed hook script: {result['script_path']}")
+        else:
+            click.echo(f"ℹ️  Hook script already exists at {result['script_path']}. Use --force to overwrite.")
+        if result["settings_updated"]:
+            click.echo(f"✅ Updated {result['settings_path']} with pre-tool hooks.")
+        else:
+            click.echo("ℹ️  Settings already configured.")
+    except Exception as exc:
+        click.echo(f"❌ Error: {exc}", err=True)
         sys.exit(1)
-
-    # 2. Determine target
-    # Assume we are in the project root or look for .claude dir
-    project_root = Path.cwd()
-    claude_dir = project_root / ".claude"
-    hooks_dir = claude_dir / "hooks"
-    
-    if not claude_dir.exists():
-        click.echo(f"⚠️  No .claude directory found at {project_root}. Creating it...")
-        claude_dir.mkdir(parents=True, exist_ok=True)
-    
-    hooks_dir.mkdir(exist_ok=True)
-    target_script = hooks_dir / "enforce-agent-mode.sh"
-
-    # 3. Copy hook script
-    if target_script.exists() and not force:
-        click.echo(f"ℹ️  Hook script already exists at {target_script}. Use --force to overwrite.")
-    else:
-        shutil.copy2(hook_src, target_script)
-        target_script.chmod(0o755)  # Make executable
-        click.echo(f"✅ Installed hook script: {target_script}")
-
-    # 4. Update settings.local.json
-    settings_file = claude_dir / "settings.local.json"
-    settings = {}
-    
-    if settings_file.exists():
-        try:
-            with open(settings_file, "r") as f:
-                settings = json.load(f)
-        except json.JSONDecodeError:
-            click.echo(f"⚠️  Warning: Could not parse {settings_file}. Starting with empty settings.")
-
-    # Ensure structure exists
-    if "hooks" not in settings:
-        settings["hooks"] = {}
-    if "PreToolUse" not in settings["hooks"]:
-        settings["hooks"]["PreToolUse"] = []
-
-    # Define the hook configurations
-    hook_configs = [
-        {
-            "matcher": "Edit|Write|MultiEdit",
-            "hooks": [
-                {
-                    "type": "command",
-                    "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/enforce-agent-mode.sh"
-                }
-            ]
-        },
-        {
-            "matcher": "Bash",
-            "hooks": [
-                {
-                    "type": "command",
-                    "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/enforce-agent-mode.sh"
-                }
-            ]
-        }
-    ]
-
-    # Merge hooks (avoid duplicates)
-    existing_hooks = settings["hooks"]["PreToolUse"]
-    updated = False
-    
-    for new_hook in hook_configs:
-        is_duplicate = False
-        for i, exist in enumerate(existing_hooks):
-            # Simple deduplication based on matcher
-            if exist.get("matcher") == new_hook["matcher"]:
-                # Check if command matches
-                cmds = exist.get("hooks", [])
-                if any(h.get("command", "").endswith("enforce-agent-mode.sh") for h in cmds):
-                     is_duplicate = True
-                     break
-        
-        if not is_duplicate:
-            existing_hooks.append(new_hook)
-            updated = True
-
-    if updated:
-        with open(settings_file, "w") as f:
-            json.dump(settings, f, indent=2)
-        click.echo(f"✅ Updated {settings_file} with pre-tool hooks.")
-    else:
-        click.echo(f"ℹ️  Settings already configured.")
 
 
 
@@ -1437,6 +1441,7 @@ def blueprint_reinforce(
 @click.option("--min-sessions", default=2, show_default=True, help="Minimum unique sessions per candidate")
 @click.option("--min-stages", default=2, show_default=True, help="Minimum unique stages per candidate")
 @click.option("--limit", default=20, show_default=True, help="Maximum candidates to return")
+@click.option("--from-session", "from_session", help="Semantic founding extraction from a single session (e.g., __blueprint__).")
 @click.option("--evaluate", is_flag=True, help="Also run promotion gate (dry-run) for each extracted candidate")
 @click.option("--min-days", default=7, show_default=True, help="Minimum temporal stability window for evaluation")
 @click.option("--json", "json_output", is_flag=True, help="Output candidates as JSON")
@@ -1447,6 +1452,7 @@ def blueprint_extract_candidates(
     min_sessions: int,
     min_stages: int,
     limit: int,
+    from_session: Optional[str],
     evaluate: bool,
     min_days: int,
     json_output: bool,
@@ -1470,14 +1476,22 @@ def blueprint_extract_candidates(
 
     db = ArtifactDatabase(idse_root=manager.idse_root, allow_create=False)
     gate = BlueprintPromotionGate(db)
-    candidates = gate.extract_candidates(
-        project,
-        stages=stages,
-        min_sources=min_sources,
-        min_sessions=min_sessions,
-        min_stages=min_stages,
-        limit=limit,
-    )
+    if from_session:
+        candidates = gate.extract_candidates_from_session(
+            project,
+            session_id=from_session.strip(),
+            stages=stages,
+            limit=limit,
+        )
+    else:
+        candidates = gate.extract_candidates(
+            project,
+            stages=stages,
+            min_sources=min_sources,
+            min_sessions=min_sessions,
+            min_stages=min_stages,
+            limit=limit,
+        )
 
     if not candidates:
         click.echo("No candidates found for current thresholds.")
@@ -1741,71 +1755,8 @@ def compile_agent_spec_cmd(
         sys.exit(1)
 
 
-@main.group()
-def profiler():
-    """Profiler intake and schema tools."""
-    pass
-
-
-@profiler.command("intake")
-@click.option("--out", type=click.Path(path_type=Path), help="Write accepted mapped JSON to path.")
-def profiler_intake_cmd(out: Optional[Path]):
-    """Run interactive Agent Spec Profiler intake."""
-    import json
-
-    from .profiler import (
-        ProfilerRejection,
-        collect_profiler_answers_interactive,
-        run_profiler_intake,
-    )
-
-    try:
-        payload = collect_profiler_answers_interactive()
-        result = run_profiler_intake(payload)
-
-        if isinstance(result, ProfilerRejection):
-            click.echo("❌ Profiler rejected input", err=True)
-            click.echo(
-                json.dumps(
-                    {
-                        "errors": [error.model_dump() for error in result.errors],
-                        "next_questions": result.next_questions,
-                    },
-                    indent=2,
-                ),
-                err=True,
-            )
-            sys.exit(1)
-
-        mapped = result.mapped_agent_profile_spec
-        if out:
-            out.parent.mkdir(parents=True, exist_ok=True)
-            out.write_text(json.dumps(mapped, indent=2, sort_keys=True) + "\n")
-            click.echo(f"✅ Wrote mapped profile JSON: {out}")
-            return
-
-        click.echo(json.dumps(mapped, indent=2, sort_keys=True))
-    except Exception as e:
-        click.echo(f"❌ Error: {e}", err=True)
-        sys.exit(1)
-
-
-@profiler.command("export-schema")
-@click.option("--out", type=click.Path(path_type=Path), required=True, help="Output schema file path.")
-def profiler_export_schema_cmd(out: Path):
-    """Export AgentSpecProfilerDoc JSON Schema."""
-    import json
-
-    from .profiler import export_profiler_json_schema
-
-    try:
-        schema = export_profiler_json_schema()
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(json.dumps(schema, indent=2, sort_keys=True) + "\n")
-        click.echo(f"✅ Wrote profiler schema: {out}")
-    except Exception as e:
-        click.echo(f"❌ Error: {e}", err=True)
-        sys.exit(1)
+from .profiler.commands import profiler as profiler_cmd
+main.add_command(profiler_cmd, name="profiler")
 
 
 

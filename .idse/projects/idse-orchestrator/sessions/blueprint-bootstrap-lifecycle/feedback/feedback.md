@@ -16,12 +16,19 @@
 - Existing SQLite databases with `blueprint_claims.promotion_record_id NOT NULL` cannot accept declared claims unless migrated.
 - Mitigation implemented: automatic table-rebuild migration in `_ensure_columns()` when legacy constraint is detected.
 - Residual risk: if external/manual DB variants diverge from expected schema shape, migration may require manual intervention.
+- Candidate extraction UX gap: cross-session clustering produced line-fragment candidates during founding bootstrap.
+- Mitigation implemented: new semantic mode `blueprint extract-candidates --from-session <session>` for single-session founding extraction.
+- Bootstrap UX gap: first `idse init` could leave project agent registry empty and no `.claude` enforcement hooks, requiring manual recovery steps.
+- Mitigation implemented: init now seeds default registry and creates `.claude/hooks` + settings automatically.
 
 ## Actions / Follow-ups
 - Owner: implementation agent
 - Action: completed end-to-end tests for declaration, reinforcement, view rendering, CLI commands, and migration behavior.
 - Status: done
 - Recommended next follow-up: run `idse validate --project idse-orchestrator` and `idse sync push --project idse-orchestrator` when ready to publish session artifacts.
+- Owner: implementation agent
+- Action: added `--from-session` extractor mode and tests to support founding blueprint claim discovery.
+- Status: done
 
 ## Decision Log
 - Decision: `promotion_record_id` is nullable for `blueprint_claims`.

@@ -132,6 +132,39 @@ def run_profiler_intake(payload: Dict[str, Any]) -> ProfilerAcceptance | Profile
     return ProfilerAcceptance(doc=doc, mapped_agent_profile_spec=mapped)
 
 
+def save_profiler_answers_to_json(path: Path, payload: Dict[str, Any]) -> None:
+    """Save collected profiler answers using deterministic JSON serialization."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            payload,
+            sort_keys=True,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def load_profiler_answers_from_json(path: Path) -> Dict[str, Any]:
+    """Load profiler answers from JSON and validate shape upfront."""
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise click.ClickException(f"Invalid JSON in {path}: {exc}") from exc
+
+    try:
+        AgentSpecProfilerDoc.model_validate(payload)
+    except PydanticValidationError as exc:
+        raise click.ClickException(f"Invalid profiler JSON schema: {exc}") from exc
+
+    if not isinstance(payload, dict):
+        raise click.ClickException("Profiler JSON payload must be an object.")
+    return payload
+
+
 def write_json(path: Path, payload: Dict[str, Any]) -> None:
+    # Backwards-compatible helper used by command layer.
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")

@@ -58,12 +58,14 @@ class PersonaOverlay(BaseModel):
 class AgentSpecProfilerDoc(BaseModel):
     mission_contract: MissionContract
     persona_overlay: PersonaOverlay = Field(default_factory=PersonaOverlay)
+    schema_version: str = "1.0"
 
 
 class ProfilerError(BaseModel):
     field: str
     code: ProfilerErrorCode
     message: str
+    severity: str = "error"
 
 
 class ProfilerRejection(BaseModel):

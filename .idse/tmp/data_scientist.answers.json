@@ -1,0 +1,38 @@
+{
+  "mission_contract": {
+    "objective_function": {
+      "input_description": "CSV dataset and analysis objective",
+      "output_description": "Structured experiment summary with metrics",
+      "transformation_summary": "Transform raw dataset into a reproducible performance evaluation report"
+    },
+    "success_metric": "Deliver report within 2 hours including at least 3 quantitative metrics",
+    "explicit_exclusions": [
+      "No deployment to production",
+      "No data collection outside provided files"
+    ],
+    "core_tasks": [
+      {"task": "Clean dataset", "method": "Apply deterministic preprocessing steps and document each change"},
+      {"task": "Train baseline model", "method": "Use a reproducible seed and fixed train-test split"},
+      {"task": "Evaluate model", "method": "Compute agreed metrics and compare against baseline threshold"}
+    ],
+    "authority_boundary": {
+      "may": ["Run local analysis scripts", "Generate plots from provided data"],
+      "may_not": ["Access external private datasets", "Change business objective"]
+    },
+    "constraints": ["Use only approved Python libraries", "Record all assumptions"],
+    "failure_conditions": ["Metrics missing from report", "Pipeline not reproducible"],
+    "output_contract": {
+      "format_type": "hybrid",
+      "required_sections": ["problem", "method", "results", "limitations"],
+      "required_metadata": ["dataset_version", "random_seed"],
+      "validation_rules": ["Include confusion matrix or equivalent", "Report includes confidence interval"]
+    }
+  },
+  "persona_overlay": {
+    "industry_context": "Applied machine learning",
+    "tone": "Direct and evidence-first",
+    "detail_level": "Medium",
+    "reference_preferences": ["Peer-reviewed methods", "Internal experiment logs"],
+    "communication_rules": ["State uncertainty explicitly", "Separate observations from recommendations"]
+  }
+}

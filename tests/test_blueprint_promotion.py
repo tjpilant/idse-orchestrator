@@ -212,3 +212,36 @@ def test_extract_candidates_maps_purpose_from_intent_context(tmp_path: Path) -> 
         == "IDSE Orchestrator is the design-time Documentation OS for project intent and delivery."
         for item in candidates
     )
+
+
+def test_extract_candidates_from_session_finds_founding_claims(tmp_path: Path) -> None:
+    db = ArtifactDatabase(idse_root=tmp_path / ".idse")
+    project = "demo"
+    db.save_artifact(
+        project,
+        "__blueprint__",
+        "intent",
+        "SQLite is default storage backend for all new projects.",
+    )
+    db.save_artifact(
+        project,
+        "__blueprint__",
+        "spec",
+        "The orchestrator is a design-time Documentation OS for Intent-Driven Systems Engineering.",
+    )
+    gate = BlueprintPromotionGate(db)
+
+    candidates = gate.extract_candidates_from_session(
+        project,
+        session_id="__blueprint__",
+        stages=("intent", "spec"),
+        limit=10,
+    )
+
+    assert candidates
+    claim_texts = {item.claim_text for item in candidates}
+    assert "SQLite is the authoritative storage backend for project artifacts." in claim_texts
+    assert (
+        "IDSE Orchestrator is the design-time Documentation OS for project intent and delivery."
+        in claim_texts
+    )

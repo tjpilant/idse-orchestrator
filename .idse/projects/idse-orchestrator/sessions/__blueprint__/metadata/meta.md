@@ -8,6 +8,7 @@ This document tracks all sessions spawned from this Blueprint.
 - `__blueprint__` (THIS SESSION) - Project governance and roadmap
 - `designstore-file-artifacts` - Feature session
 - `item8-test-session` - Feature session
+- `blueprint-bootstrap-lifecycle` - Feature session
 
 ## Session Status Matrix
 
@@ -20,12 +21,14 @@ This document tracks all sessions spawned from this Blueprint.
 | item8-test-session | feature | draft | system | 2026-02-09 | 0% |
 | component-impact-parser | feature | complete | system | 2026-02-10 | 100% |
 | agent-spec-compiler | feature | complete | system | 2026-02-10 | 100% |
+| blueprint-bootstrap-lifecycle | feature | draft | system | 2026-02-13 | 0% |
 
 ## Lineage Graph
 
 ```
 __blueprint__ (root)
 ├── agent-spec-compiler
+├── blueprint-bootstrap-lifecycle
 ├── component-impact-parser
 ├── designstore-file-artifacts
 ├── item8-test-session
@@ -50,14 +53,14 @@ Feedback from Feature Sessions flows upward to inform Blueprint updates.
 - `notion-designstore-refactor`: Enhanced blueprint metadata rollup to include delivery and feedback lessons from SQLite artifacts.; Hardened markdown section extraction to support `#`, `##`, `###`, and `Executive Summary` variants.; Refactored backend semantics: SQLite is now treated as storage core while sync uses a separate `sync_backend`.; Added session metadata management commands to avoid direct JSON edits:; `idse session set-owner`
 - `item8-test-session`: **ComponentName** (source_module.py); Parent Primitives: PrimitiveA, PrimitiveB; Type: Projection/Operation/Infrastructure/Routing; Changes: [brief description]; **NewComponentName** (source_module.py)
 - `component-impact-parser`: Updated validation engine to enforce implementation artifact quality:; `src/idse_orchestrator/validation_engine.py`; `implementation.md` is validated as a first-class artifact.; Placeholder markers now fail validation.; `Component Impact Report` section and component entries are required.
-- `agent-spec-compiler`: `SessionLoader` now supports backend-aware loading.; SQLite is the primary source when backend is `sqlite`.; Filesystem is used as an explicit backend or fallback when SQLite is unavailable.; CLI global `--backend` now flows into `compile agent-spec`.; Reviewed all 7 compiler modules under `src/idse_orchestrator/compiler/`.
+- `agent-spec-compiler`: `models.py` — ObjectiveFunction, CoreTask, AuthorityBoundary, OutputContract, MissionContract, PersonaOverlay, AgentSpecProfilerDoc (with `schema_version: str = "1.0"`); `error_codes.py` — 22 canonical error codes with stable numeric IDs (E1000-E1018, W2001-W2002); `validate.py` — Enforcement rules engine with 8 detection functions; `map_to_agent_profile_spec.py` — Deterministic mapper (zero inference); `cli.py` — Interactive 20-question intake + 3-phase pipeline
 
 ## Feedback & Lessons Learned
 
 - `sqlite-cms-refactor`: Stored project state as JSON in SQLite for parity with legacy `session_state.json`.; Clarify defaults: SQLite is default for new projects; filesystem is legacy/explicit opt-in.; Session state file should become a generated view of CURRENT_SESSION state from SQLite.
 - `notion-designstore-refactor`: **MCP Parameter Discovery**: Use `mcp_github` tools for code, but rely on `describe` or direct schema fetches for Notion. The Notion API shapes for `parent` (needs explicit `type: database_id`) and...; **Status Property Shape**: Notion's `status` property is an object, not a simple string. Flattening payloads for `create_page` vs `update_page` required distinct handling.; **Fallback Parent Format**: The initial implementation assumed `parent: { database_id: ... }` was sufficient, but `parent: { type: "database_id", database_id: ... }` is strictly required.
 - `component-impact-parser`: Decision: Keep enforcement guardrails; do not reintroduce parser/database component-sync feature in this session.; Decision: Accept implementation report as sufficient session output for governance and handoff.; Decision: Storage-side agents own operational use of report data post-closeout.
-- `agent-spec-compiler`: Decision: SQLite is primary compiler source when backend is `sqlite`.; Rationale: aligns with project invariant that SQLite is the source of truth.; Decision: fallback to filesystem when SQLite path is unavailable.; Rationale: preserves operability for partial/local setups and migration windows.; Decision: CLI global `--backend` must be propagated to `compile agent-spec`.
+- `agent-spec-compiler`: Pydantic v2 schema constraints create a "two-layer" validation boundary. Design error codes knowing which layer catches which violation.; Document generation from structured data requires careful prose quality. Template-based generation produces acceptable but formulaic output.; End-to-end integration tests (profiler → spec.md → compiler → .profile.yaml) are the most valuable tests in the suite — they catch interface mismatches between independently developed components.; Stable numeric error code IDs (E1000-E1018, W2001-W2002) enable future tooling (IDE integrations, CI scripts) without string parsing.; Decision: Implement profiler as separate pre-compiler package (`src/idse_orchestrator/profiler/`) instead of folding into compiler package.
 
 ## Blueprint Promotion Record
 
@@ -103,4 +106,4 @@ Feedback from Feature Sessions flows upward to inform Blueprint updates.
 <!-- END CUSTOM NARRATIVE -->
 
 ---
-*Last updated: 2026-02-11T03:35:38.102902*
+*Last updated: 2026-02-13T17:03:16.924553*

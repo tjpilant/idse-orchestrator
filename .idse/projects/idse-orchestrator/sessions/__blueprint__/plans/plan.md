@@ -118,3 +118,151 @@ Scope: `DocToAgentProfileSpecCompiler`.
 	- etc.
 
 Each feature session inherits intent/context from the Blueprint and narrows it for that primitive.
+
+---
+
+## Appendix A: Zcompiler v1 — AgentSpec Compilation Path
+
+### Role
+The AgentSpec compilation path transforms a validated `AgentProfileSpec` (JSON) into a deterministic, versioned `AgentArtifact` (ZPrompt XML) that can be loaded by `AgentRuntime`, traced by `RunTrace`, and versioned by `ArtifactRegistry`.
+
+### Input: AgentProfileSpec
+
+```
+AgentProfileSpec {
+  name                    // nullable — assigned post-compilation or by registry
+  description             // from transformation_summary
+  objective_function {
+    input_description
+    output_description
+    transformation_summary
+  }
+  success_criteria
+  out_of_scope[]
+  capabilities[] { task, method }   // max 8
+  action_permissions { may[], may_not[] }
+  constraints[]
+  failure_modes[]
+  output_contract {
+    format_type             // "narrative" | "json" | "hybrid"
+    required_sections[]
+    required_metadata[]
+    validation_rules[]
+  }
+  persona {
+    industry_context, tone, detail_level
+    reference_preferences[], communication_rules[]
+  }
+}
+```
+
+### Output: AgentArtifact
+
+```
+AgentArtifact {
+  id
+  sourceSpecHash         // SHA256 of input AgentProfileSpec
+  zpromptXml             // fully resolved ZPrompt XML document
+  modelTarget
+  compileHash            // SHA256 of all compilation inputs + version
+  compilerVersion
+  createdAt
+}
+```
+
+No optional fields. No partial artifacts. No side effects.
+
+### ZPrompt IR (Internal Representation)
+
+```
+ZPrompt {
+  mission { objective, successCriteria, exclusions[] }
+  role { permissions[], prohibitions[], constraints[], failureConditions[] }
+  taskPolicy { tasks[] { name, method } }
+  outputContract { formatType, sections[], metadata[], validationRules[] }
+  persona { industry, tone, detailLevel, references[], communicationRules[] }
+  modelTarget
+}
+```
+
+Every field traces back to an `AgentProfileSpec` field. No inference. No generation.
+
+### 10-Stage Compilation Pipeline
+
+| Stage | Input | Output | Logic |
+|-------|-------|--------|-------|
+| 1. Mission Extraction | objective_function + success_criteria + out_of_scope | mission IR | Direct mapping |
+| 2. Role Binding | action_permissions + constraints + failure_modes | role IR | Explicit (not inferred like SQRA) |
+| 3. Task Policy Assembly | capabilities[] | taskPolicy IR | Direct mapping (max 8, pre-validated) |
+| 4. Output Contract Binding | output_contract | outputContract IR | Direct mapping |
+| 5. Persona Overlay | persona | persona IR | Nullable fields omitted from XML |
+| 6. Model Target Selection | CompilerConfig + task complexity | modelTarget | Deterministic heuristic |
+| 7. ZPrompt Assembly | All IR sections | Complete ZPrompt | Composition only |
+| 8. XML Materialization | ZPrompt IR | XML document | Template rendering, 1:1 field mapping |
+| 9. Hash & Version | AgentProfileSpec + modelTarget + version | sourceSpecHash + compileHash | SHA256 |
+| 10. Emit AgentArtifact | All above | Final immutable artifact | No side effects |
+
+### XML Output Structure
+
+```xml
+<agent version="1.0" compiler="zcompiler-v1">
+  <mission>
+    <objective>
+      <input>...</input>
+      <output>...</output>
+      <transform>...</transform>
+    </objective>
+    <success-criteria>...</success-criteria>
+    <exclusions><exclusion>...</exclusion></exclusions>
+  </mission>
+  <role>
+    <permissions><permission>...</permission></permissions>
+    <prohibitions><prohibition>...</prohibition></prohibitions>
+    <constraints><constraint>...</constraint></constraints>
+    <failure-conditions><condition>...</condition></failure-conditions>
+  </role>
+  <task-policy>
+    <task name="..."><method>...</method></task>
+  </task-policy>
+  <output-contract format="...">
+    <sections><section>...</section></sections>
+    <metadata><field>...</field></metadata>
+    <validation><rule>...</rule></validation>
+  </output-contract>
+  <persona industry="..." tone="..." detail="...">
+    <references><ref>...</ref></references>
+    <communication-rules><rule>...</rule></communication-rules>
+  </persona>
+</agent>
+```
+
+### Hash Chain: Full Traceability
+
+```
+Profiler intake (20 Qs)
+  → profiler_hash (SHA256 of ProfilerDoc JSON)
+    → AgentProfileSpec JSON
+      → sourceSpecHash (SHA256 of spec)
+        → Zcompiler stages 1-8
+          → compileHash (SHA256 of sourceSpecHash + modelTarget + version)
+            → AgentArtifact (immutable, versioned)
+```
+
+### Difference from SMART Question Path
+
+| Concern | SMART Question | Agent Spec |
+|---------|---------------|------------|
+| Input | SmartQuestion + UserBlueprint | AgentProfileSpec |
+| Role source | Inferred from SQRA role enum | Explicit from action_permissions |
+| Scaffold | Selected (IDEA/Blueprint/TradeoffMatrix) | Fixed: Agent XML template |
+| Task policy | None (single question) | Explicit capabilities[] (max 8) |
+| Guardrails | Minimal (role-scoped) | Full (may/may_not/constraints/failure_modes) |
+
+Both converge at ZPrompt IR. Both emit through the same hashing and versioning stages.
+
+### v1 Non-Goals
+- Does not optimize or rewrite XML
+- Does not learn from execution results
+- Does not resolve CMS/database SOPs (that's runtime)
+- Does not inject tool definitions (that's runtime configuration)
+- Does not call LLMs for any reason

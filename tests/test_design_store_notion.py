@@ -100,7 +100,7 @@ def test_notion_schema_map_computed_fields():
     )
 
     fields = result["fields"]
-    assert fields["title"] == "Implementation – feature-v2"
+    assert fields["title"] == "feature-v2 – Implementation"
     assert "project" not in fields
     assert fields["idse_id"] == "demo::feature-v2::implementation"
     assert fields["status"] == "In Review"
@@ -152,7 +152,7 @@ def test_notion_schema_map_excludes_create_only_fields_on_update():
     assert result["fields"]["session"] == "feature-v2"
 
 
-def test_title_uses_stage_session_format():
+def test_title_uses_session_stage_format():
     schema_map = NotionSchemaMap(NotionDesignStore.DEFAULT_PROPERTIES)
     result = schema_map.build_projection(
         project="idse-orchestrator",
@@ -162,7 +162,7 @@ def test_title_uses_stage_session_format():
         include_idse_id=False,
         content_type="page_body",
     )
-    assert result["fields"]["title"] == "Intent – my-session"
+    assert result["fields"]["title"] == "my-session – Intent"
     assert "project" not in result["fields"]
 
 

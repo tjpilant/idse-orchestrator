@@ -51,6 +51,10 @@ Additional targeted runs were executed during implementation for:
 
 - No architectural deviations.
 - Minor implementation detail: to safely support existing databases with `promotion_record_id NOT NULL`, a table-rebuild migration was implemented in `_ensure_columns()` instead of relying on insert-time behavior.
+- Post-plan enhancement: added semantic single-session extraction mode for founding blueprints:
+  - `idse blueprint extract-candidates --from-session __blueprint__`
+  - This path is optimized for founding claim discovery from one session and avoids strict cross-session thresholds.
+- Bootstrap hardening enhancement: `idse init` now seeds a default non-empty project `agent_registry.json` and initializes `.claude/hooks/enforce-agent-mode.sh` + `.claude/settings.local.json` automatically.
 
 ## Component Impact Report
 
@@ -59,6 +63,10 @@ Additional targeted runs were executed during implementation for:
 - **CLIInterface** (`src/idse_orchestrator/cli.py`) — Modified — Routing — Parent: `CLIInterface`
 - **FileViewGenerator** (`src/idse_orchestrator/file_view_generator.py`) — Modified — Projection — Parent: `DesignStore`
 - **Test coverage** (`tests/test_blueprint_claims.py`, `tests/test_cli.py`, `tests/test_file_view_generator.py`, `tests/test_artifact_database.py`) — Modified — Artifact — Parent: `ConstitutionRules`
+- **Founding Candidate Extraction** (`src/idse_orchestrator/blueprint_promotion.py`) — Modified — Operation — Parent: `ConstitutionRules`
+- **Blueprint Extract CLI Mode** (`src/idse_orchestrator/cli.py`) — Modified — Routing — Parent: `CLIInterface`
+- **Extraction tests** (`tests/test_blueprint_promotion.py`, `tests/test_cli.py`) — Modified — Artifact — Parent: `ConstitutionRules`
+- **Init bootstrap defaults** (`src/idse_orchestrator/project_workspace.py`, `src/idse_orchestrator/cli.py`) — Modified — Routing/Infrastructure — Parent: `CLIInterface`
 
 ### Files Edited (no component mapping)
 

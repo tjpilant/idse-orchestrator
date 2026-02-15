@@ -418,6 +418,96 @@ class BlueprintPromotionGate:
         )
         return candidates[: max(1, limit)]
 
+    def extract_candidates_from_session(
+        self,
+        project: str,
+        *,
+        session_id: str,
+        stages: Optional[Iterable[str]] = None,
+        limit: int = 20,
+    ) -> List[PromotionCandidate]:
+        """Extract founding candidates from a single session using semantic heuristics."""
+        allowed_stages = (
+            {stage.strip().lower() for stage in stages if stage.strip()}
+            if stages
+            else {"intent", "context", "spec", "implementation", "feedback", "plan", "tasks"}
+        )
+
+        artifacts = self.db.list_artifacts(project)
+        clusters: List[Dict[str, Any]] = []
+
+        for artifact in artifacts:
+            if artifact.session_id != session_id:
+                continue
+            if artifact.stage not in allowed_stages:
+                continue
+
+            statements = _extract_founding_statements(artifact.content)
+            if not statements:
+                continue
+
+            for statement in statements:
+                canonical_claim = _canonical_claim(statement)
+                normalized = _normalize_statement(canonical_claim or statement)
+                if not normalized:
+                    continue
+                source_ref = (artifact.session_id, artifact.stage)
+
+                best_idx: Optional[int] = None
+                best_score = 0.0
+                for idx, cluster in enumerate(clusters):
+                    score = self._statement_similarity(normalized, cluster["representative_norm"])
+                    if score > best_score:
+                        best_idx = idx
+                        best_score = score
+
+                if best_idx is None or best_score < 0.86:
+                    clusters.append(
+                        {
+                            "representative": canonical_claim or statement,
+                            "representative_norm": normalized,
+                            "texts": [canonical_claim or statement],
+                            "sources": {source_ref},
+                            "sessions": {artifact.session_id},
+                            "stages": {artifact.stage},
+                        }
+                    )
+                    continue
+
+                cluster = clusters[best_idx]
+                cluster["texts"].append(canonical_claim or statement)
+                cluster["sources"].add(source_ref)
+                cluster["sessions"].add(artifact.session_id)
+                cluster["stages"].add(artifact.stage)
+                if len(statement) < len(cluster["representative"]):
+                    cluster["representative"] = canonical_claim or statement
+                    cluster["representative_norm"] = normalized
+
+        candidates: List[PromotionCandidate] = []
+        for cluster in clusters:
+            claim_text = _choose_claim_text(cluster["texts"])
+            if not claim_text:
+                continue
+            candidates.append(
+                PromotionCandidate(
+                    claim_text=claim_text,
+                    source_refs=sorted(cluster["sources"]),
+                    support_count=len(cluster["sources"]),
+                    session_count=1,
+                    stage_count=len(cluster["stages"]),
+                    suggested_classification=_suggest_classification(claim_text),
+                )
+            )
+
+        candidates.sort(
+            key=lambda item: (
+                -item.stage_count,
+                -item.support_count,
+                len(item.claim_text),
+            )
+        )
+        return candidates[: max(1, limit)]
+
     def _load_sources(
         self, project: str, source_refs: List[Tuple[str, str]]
     ) -> List[Dict[str, Any]]:
@@ -543,6 +633,38 @@ def _extract_candidate_statements(content: str) -> List[str]:
         seen.add(norm)
         statements.append(compact)
     return statements
+
+
+def _extract_founding_statements(content: str) -> List[str]:
+    """Prefer semantically strong claim statements for single-session founding extraction."""
+    extracted = _extract_candidate_statements(content)
+    if not extracted:
+        return []
+
+    canonical_hits: List[str] = []
+    for statement in extracted:
+        canonical = _canonical_claim(statement)
+        if canonical:
+            canonical_hits.append(canonical)
+
+    if canonical_hits:
+        return sorted(set(canonical_hits), key=len)
+
+    claim_markers = (
+        "must",
+        "must not",
+        "never",
+        "authoritative",
+        "source of truth",
+        "default",
+        "out of scope",
+        "in scope",
+        "owns",
+        "responsible",
+        "is not",
+    )
+    filtered = [s for s in extracted if any(marker in s.lower() for marker in claim_markers)]
+    return filtered if filtered else extracted[:10]
 
 
 def _normalize_statement(text: str) -> str:

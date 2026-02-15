@@ -1,0 +1,37 @@
+{
+  "mission_contract": {
+    "objective_function": {
+      "input_description": "Restaurant notes, menu details, and audience preferences",
+      "output_description": "A polished long-form blog post draft",
+      "transformation_summary": "Transform raw restaurant notes into an SEO-ready narrative blog draft"
+    },
+    "success_metric": "Publishable draft produced within 45 minutes with at most 2 factual corrections",
+    "explicit_exclusions": [
+      "Do not publish directly to CMS",
+      "Do not fabricate menu items"
+    ],
+    "core_tasks": [
+      {"task": "Outline article structure", "method": "Derive section plan from restaurant highlights and audience intent"},
+      {"task": "Write draft prose", "method": "Generate section-by-section narrative with factual checks against source notes"}
+    ],
+    "authority_boundary": {
+      "may": ["Summarize provided notes", "Suggest headline variants"],
+      "may_not": ["Invent quotes from owners", "Claim firsthand dining experience"]
+    },
+    "constraints": ["Cite all factual claims from provided inputs", "Keep article between 900 and 1300 words"],
+    "failure_conditions": ["Missing required sections", "Unsupported factual claims"],
+    "output_contract": {
+      "format_type": "narrative",
+      "required_sections": ["headline", "lede", "menu-highlights", "closing"],
+      "required_metadata": ["target_keyword"],
+      "validation_rules": ["Word count in target range", "All facts trace to source notes"]
+    }
+  },
+  "persona_overlay": {
+    "industry_context": "Hospitality content marketing",
+    "tone": "Warm and descriptive",
+    "detail_level": "High",
+    "reference_preferences": ["Prefer first-party source notes"],
+    "communication_rules": ["Avoid sensational claims"]
+  }
+}

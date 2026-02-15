@@ -40,6 +40,28 @@ MEASURABLE_HINTS = (
     "seconds",
 )
 
+NON_ACTIONABLE_METHOD_PHRASES = {
+    "best practices",
+    "leverage ai",
+    "use common sense",
+    "follow standards",
+    "apply best practices",
+    "use ai",
+    "leverage machine learning",
+    "use appropriate methods",
+    "follow guidelines",
+    "apply industry standards",
+}
+
+MARKDOWN_VALIDATION_KEYWORDS = {
+    "markdown heading",
+    "markdown section",
+    "## ",
+    "### ",
+    "markdown format",
+    "heading level",
+}
+
 
 def _has_number(text: str) -> bool:
     return bool(re.search(r"\d", text))
@@ -59,7 +81,6 @@ def _looks_multi_objective(summary: str) -> bool:
     lowered = summary.lower()
     if " and " in lowered or " or " in lowered:
         return True
-    # Heuristic: two or more comma-separated clauses often indicate multiple objectives.
     return lowered.count(",") >= 2
 
 
@@ -74,8 +95,131 @@ def _add_error(
     field: str,
     code: ProfilerErrorCode,
     message: str,
+    severity: str = "error",
 ) -> None:
-    errors.append(ProfilerError(field=field, code=code, message=message))
+    errors.append(ProfilerError(field=field, code=code, message=message, severity=severity))
+
+
+def _detect_non_actionable_methods(
+    doc: AgentSpecProfilerDoc,
+    errors: List[ProfilerError],
+    next_questions: List[str],
+) -> None:
+    """E1008: Flag methods that are generic platitudes, not operational steps."""
+    for i, task in enumerate(doc.mission_contract.core_tasks):
+        lowered = task.method.lower().strip()
+        if any(phrase in lowered for phrase in NON_ACTIONABLE_METHOD_PHRASES):
+            _add_error(
+                errors,
+                field=f"mission_contract.core_tasks[{i}].method",
+                code=ProfilerErrorCode.NON_ACTIONABLE_METHOD,
+                message=f"Method '{task.method}' is a platitude, not an operational step.",
+            )
+            next_questions.append(
+                f"How specifically should the agent perform '{task.task}'? "
+                f"Describe a concrete algorithm, rule, or technique."
+            )
+
+
+def _detect_scope_contradictions(
+    doc: AgentSpecProfilerDoc,
+    errors: List[ProfilerError],
+    next_questions: List[str],
+) -> None:
+    """E1017: Check if explicit_exclusions contradict core_tasks or output_contract."""
+    mc = doc.mission_contract
+    exclusions_lower = [e.lower() for e in mc.explicit_exclusions]
+    for i, task in enumerate(mc.core_tasks):
+        task_lower = task.task.lower()
+        for excl in exclusions_lower:
+            if task_lower in excl or excl in task_lower:
+                _add_error(
+                    errors,
+                    field=f"mission_contract.core_tasks[{i}].task",
+                    code=ProfilerErrorCode.SCOPE_CONTRADICTION,
+                    message=f"Core task '{task.task}' contradicts exclusion '{excl}'.",
+                )
+                next_questions.append(
+                    f"Task '{task.task}' appears in both core_tasks and explicit_exclusions. "
+                    "Which one should be removed?"
+                )
+    for section in mc.output_contract.required_sections:
+        section_lower = section.lower()
+        for excl in exclusions_lower:
+            if section_lower in excl or excl in section_lower:
+                _add_error(
+                    errors,
+                    field="mission_contract.output_contract.required_sections",
+                    code=ProfilerErrorCode.SCOPE_CONTRADICTION,
+                    message=f"Required section '{section}' contradicts exclusion '{excl}'.",
+                )
+
+
+def _detect_unverifiable_metrics(
+    doc: AgentSpecProfilerDoc,
+    errors: List[ProfilerError],
+    next_questions: List[str],
+) -> None:
+    """W2002: Warn if success_metric seems to require tools not in authority_boundary.may."""
+    mc = doc.mission_contract
+    metric_lower = mc.success_metric.lower()
+
+    tool_keywords = ["api", "database", "network", "external", "third-party", "internet", "web"]
+    needs_external = any(kw in metric_lower for kw in tool_keywords)
+
+    if needs_external:
+        may_lower = " ".join(mc.authority_boundary.may).lower()
+        has_external_access = any(kw in may_lower for kw in tool_keywords)
+        if not has_external_access:
+            _add_error(
+                errors,
+                field="mission_contract.success_metric",
+                code=ProfilerErrorCode.SUCCESS_METRIC_NOT_LOCALLY_VERIFIABLE,
+                message="Success metric appears to require tools/data the agent doesn't have authority to access.",
+                severity="warning",
+            )
+            next_questions.append(
+                "The success metric references external resources. "
+                "Can you add the required access to authority_boundary.may, or rewrite "
+                "the metric to be locally verifiable?"
+            )
+
+
+def _detect_output_contract_incoherence(
+    doc: AgentSpecProfilerDoc,
+    errors: List[ProfilerError],
+    next_questions: List[str],
+) -> None:
+    """E1018: Check format_type vs validation_rules consistency."""
+    oc = doc.mission_contract.output_contract
+
+    if oc.format_type == "json":
+        for rule in oc.validation_rules:
+            rule_lower = rule.lower()
+            if any(kw in rule_lower for kw in MARKDOWN_VALIDATION_KEYWORDS):
+                _add_error(
+                    errors,
+                    field="mission_contract.output_contract.validation_rules",
+                    code=ProfilerErrorCode.OUTPUT_CONTRACT_INCOHERENT,
+                    message=f"format_type is 'json' but validation rule '{rule}' "
+                    "references markdown-specific structure.",
+                )
+                next_questions.append(
+                    "Output format is JSON but validation rules reference markdown. "
+                    "Either change format_type or update validation rules."
+                )
+
+    if oc.format_type in {"narrative", "hybrid"}:
+        for rule in oc.validation_rules:
+            rule_lower = rule.lower()
+            if "json schema" in rule_lower or "jsonschema" in rule_lower:
+                _add_error(
+                    errors,
+                    field="mission_contract.output_contract.validation_rules",
+                    code=ProfilerErrorCode.OUTPUT_CONTRACT_INCOHERENT,
+                    message=f"format_type is '{oc.format_type}' but validation rule "
+                    f"'{rule}' references JSON schema validation.",
+                )
 
 
 def validate_profiler_doc(doc: AgentSpecProfilerDoc) -> Optional[ProfilerRejection]:
@@ -164,13 +308,6 @@ def validate_profiler_doc(doc: AgentSpecProfilerDoc) -> Optional[ProfilerRejecti
                 code=ProfilerErrorCode.MISSING_TASK,
                 message="Task label is required.",
             )
-        if not task.method.strip():
-            _add_error(
-                errors,
-                field=f"mission_contract.core_tasks[{i}].method",
-                code=ProfilerErrorCode.MISSING_METHOD,
-                message="Task method is required.",
-            )
 
     if not mission.authority_boundary.may:
         _add_error(
@@ -215,6 +352,12 @@ def validate_profiler_doc(doc: AgentSpecProfilerDoc) -> Optional[ProfilerRejecti
         next_questions.append(
             "Can you move style/tone language into persona_overlay and keep mission purely functional?"
         )
+
+    # Phase 10: Advanced validation rules
+    _detect_non_actionable_methods(doc, errors, next_questions)
+    _detect_scope_contradictions(doc, errors, next_questions)
+    _detect_unverifiable_metrics(doc, errors, next_questions)
+    _detect_output_contract_incoherence(doc, errors, next_questions)
 
     if not errors:
         return None

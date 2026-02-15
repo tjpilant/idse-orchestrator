@@ -69,3 +69,31 @@ The timed-out implementation gap was closed with upstream code changes and tests
 Result:
 - Setup now generates stable Notion config for current MCP tools.
 - Query payloads now use canonical `view://<dashed-uuid>` values.
+
+## Per-Project Config Implementation (2026-02-11)
+
+**Issue**: Global `~/.idseconfig.json` caused cross-project Notion database pollution. When user ran `idse sync setup` for a new project, it loaded the existing global config with database ID from a different project, causing new projects to inherit the wrong Notion database.
+
+**Solution Implemented**: Per-project config with local-first resolution.
+
+**What Worked Well**:
+- Simple, familiar pattern (like `.npmrc` or `.gitconfig`)
+- Config resolution priority is clear: explicit flag > local > global
+- `idse sync setup` prompts for save location, defaults to project-local when `.idse/` exists
+- Tests validate all three resolution paths (explicit, local, global)
+- Documentation updated in `docs/backends/notion.md`
+
+**Edge Cases Addressed**:
+- `.idse/.idseconfig.json` added to `.gitignore` to prevent credentials in version control
+- Global fallback preserved for backward compatibility
+- Explicit `--config` flag still takes highest priority
+
+**Validation**:
+- All 143 tests pass (3 new tests added for config resolution)
+- Manual testing confirms local config preferred when present
+- Existing global configs continue to work for projects without local config
+
+**Lessons**:
+- Per-project config should have been the default from the start — global config for project-specific database IDs was a design smell
+- The fix is minimal (25 lines of code) but high-impact for multi-project workflows
+- Interactive CLI prompts improve discoverability (`idse sync setup` now guides users to per-project pattern)

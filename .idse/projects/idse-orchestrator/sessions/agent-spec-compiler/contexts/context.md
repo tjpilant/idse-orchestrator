@@ -1,60 +1,156 @@
-# Context
+# Context: IDSE Developer Orchestrator
 
-## 1. Environment
+## Background
 
-- **Product / Project:** IDSE Orchestrator — design-time Documentation OS
-- **Domain:** Developer tooling, agent-driven development pipelines
-- **Users / Actors:**
-  - IDSE developers authoring pipeline docs with `## Agent Profile` YAML blocks
-  - CI pipelines running `idse compile agent-spec` as a build step
-  - PromptBraining runtime (downstream consumer — reads `.profile.yaml`, never imports IDSE)
+The IDSE Orchestrator was extracted from the idse-developer-agency monorepo to become a standalone product. It implements the Documentation OS pattern where design-time cognition is separated from run-time cognition.
 
-## 2. Stack
+## 1. Ecosystem Context
 
-- **Language:** Python 3.8+
-- **CLI:** Click 8.x
-- **Validation:** Pydantic v2 (`AgentProfileSpec` model)
-- **Serialization:** PyYAML for YAML parsing and emission
-- **Storage:** SQLite via `ArtifactDatabase` (source of truth), filesystem `.md` as generated views
-- **Templates:** Jinja2 for scaffold generation (spec-template.md includes `## Agent Profile` block)
+**Layer 1 – Artifact Core**
+- Multi-tenant backend
+- Hosts global Product Spines (PromptBraining, IDSE Orchestrator, etc.)
+- Provides MCP / HTTP APIs for sync
 
-## 3. Existing Implementation
+**Layer 2 – IDSE Orchestrator** (this product)
+- pip-installable CLI
+- Runs inside client repos
+- Manages `.idse/projects/<project>/` workspaces
+- Owns the design-time IDSE pipeline artifacts
 
-The compiler was built during initial repo extraction (commit `fa9a3d3`, 2026-02-02).
+**Layer 3 – IDE Agents**
+- Claude Code, GPT Codex, and similar
+- Called from editor or CI workflows
+- Operate on code and docs based on Orchestrator/Agency context
 
-| Module | Path | Role |
-|---|---|---|
-| `__init__.py` | `compiler/__init__.py` | Orchestrates: load → parse → merge → emit |
-| `models.py` | `compiler/models.py` | `AgentProfileSpec` Pydantic model |
-| `parser.py` | `compiler/parser.py` | Extracts `## Agent Profile` YAML block from spec.md |
-| `loader.py` | `compiler/loader.py` | `SessionLoader` — reads spec.md from filesystem |
-| `merger.py` | `compiler/merger.py` | Deep-merges blueprint defaults with feature overrides |
-| `emitter.py` | `compiler/emitter.py` | Validates via Pydantic, writes `{session}.profile.yaml` |
-| `errors.py` | `compiler/errors.py` | `AgentProfileNotFound`, `InvalidAgentProfileYAML`, `ValidationError` |
+**The Orchestrator must sit cleanly between Artifact Core and IDE Agents without collapsing into either.**
 
-CLI: `idse compile agent-spec --session <id> --project <name> --blueprint <id> --out <dir> --dry-run`
+## 2. Product Spine (Orchestrator Primitives)
 
-Tests: 7 passing across `tests/test_compiler/` (models, parser, emitter, merger).
+The Orchestrator Product Spine currently defines these primitives:
 
-## 4. Constraints
+**Workspace:**
+- ProjectWorkspace
+- SessionGraph
 
-- **No LLM calls** — compiler is deterministic, design-time only (blueprint invariant)
-- **No PromptBraining imports** — output is a file, not a function call
-- **SQLite is source of truth** — `SessionLoader` currently reads filesystem directly, bypassing the DB. This is a known gap.
-- **Schema versioning** — `AgentProfileSpec.version` field exists but no migration strategy for schema evolution
+**Cognition:**
+- PipelineArtifacts
+- StageStateModel
 
-## 5. Gaps Identified
+**Governance:**
+- ValidationEngine
+- ConstitutionRules
 
-| Gap | Impact | Severity |
-|---|---|---|
-| `SessionLoader` reads filesystem, not SQLite | Inconsistent with "SQLite is source of truth" invariant | High |
-| No end-to-end test with real project data | Exit criteria unvalidated | Medium |
-| `AgentProfileSpec` schema not published/shared | PromptBraining can't validate on read | Medium |
-| No `doc2spec-mapping.md` documentation | Mapping rules implicit in parser code | Low |
-| No versioning strategy for schema evolution | Risk of silent breakage | Low |
+**Storage:**
+- DesignStore (abstraction)
+- DesignStoreFilesystem (default impl)
 
-## 6. Risks & Unknowns
+**Sync:**
+- ArtifactSyncEngine
+- ArtifactConfig
 
-- **Schema drift:** If PromptBraining evolves its expectations independently, compiled specs may become invalid. Mitigation: version field + shared schema definition.
-- **YAML-only input:** Parser only reads `## Agent Profile` YAML blocks. If future sessions need richer compilation (e.g., from intent.md goals, plan.md constraints), the parser will need extension.
-- **Blueprint inheritance edge cases:** `merger.py` does deep dict merge with list/scalar replacement. Edge cases with nested tool configs or memory policies untested.
+**Coordination:**
+- AgentRegistry
+- IDEAgentRouting
+
+**Compilation:**
+- DocToAgentProfileSpecCompiler
+
+**CLI:**
+- CLIInterface
+
+**This blueprint must respect these as reality and not invent new components behind their back.**
+
+## 3. Constraints
+
+**Must be:**
+- Per-project and per-repo (no global state in the client's workspace)
+- CMS-agnostic via DesignStore (filesystem now, Notion/Supabase/etc. later)
+- Scriptable (CLI-first, CI-friendly)
+
+**Must obey the Spine → IDSE → Tasks doctrine:**
+- Spine declares components and posture
+- IDSE Artifacts capture reasoning
+- Tasks capture execution
+
+**Must not:**
+- Auto-mutate Spine entries
+- Conflate runtime cognition with design-time documentation
+- Leak client secrets outside of intended sync channels
+
+## 4. Dependencies and Integration Points
+
+**Depends on:**
+- A local filesystem (minimum viable DesignStoreFilesystem)
+- Network access to Artifact Core for sync
+
+**Integrates with:**
+- IDE environments via AgentRegistry and IDEAgentRouting
+- PromptBraining / Artifact Core via DocToAgentProfileSpecCompiler outputs
+
+## Technical Context
+
+- **Language**: Python 3.8+
+- **Framework**: Click (CLI), Pydantic v2 (models), Jinja2 (templates), PyYAML
+- **Architecture**: 18 modules organized by Product Spine primitives
+- **Storage**: Filesystem-based with DesignStore abstraction for future backends
+- **Testing**: pytest with 13+ tests
+
+## Key Modules
+
+| Module | Spine Primitive |
+|--------|----------------|
+| project_workspace.py | ProjectWorkspace |
+| session_graph.py | SessionGraph |
+| pipeline_artifacts.py | PipelineArtifacts |
+| stage_state_model.py | StageStateModel |
+| validation_engine.py | ValidationEngine |
+| constitution_rules.py | ConstitutionRules |
+| design_store.py | DesignStore + DesignStoreFilesystem |
+| agent_registry.py | AgentRegistry |
+| ide_agent_routing.py | IDEAgentRouting |
+| compiler/ | DocToAgentProfileSpecCompiler |
+| cli.py | CLIInterface |
+
+## Dependencies
+
+- click>=8.1.0, pydantic>=2.0.0, jinja2>=3.1.0, pyyaml>=6.0.0
+- Dev: pytest, pytest-cov, black, flake8, mypy
+
+## Related Systems
+
+- IDSE Constitution (Articles I-X) — governance framework
+- Agency Swarm — multi-agent orchestration framework
+- PromptBraining SDK / Zcompiler — downstream consumer of Orchestrator outputs
+
+## 5. PromptBraining SDK & Zcompiler Relationship
+
+The IDSE Orchestrator produces structured JSON artifacts (AgentProfileSpec, SMART Question specs) that feed the **Zcompiler** — the core of the PromptBraining SDK.
+
+### Zcompiler Role
+The Zcompiler is a **deterministic XML transformer**. It converts structured JSON specs into ZPrompt XML artifacts that LLMs execute against. XML is chosen over markdown because agents follow XML instructions with significantly higher adherence and guidance fidelity.
+
+### Pipeline Invariant
+Regardless of input type (Agent spec or SMART Question / IDEA Framework), the pipeline is:
+
+```
+Structured intake → Validated JSON → Zcompiler → XML artifact → Runtime → Trace → Memory → Next version
+```
+
+The *type* of thing being compiled changes. The *pipeline* does not.
+
+### Dual Intake Paths
+The Orchestrator's profiler module serves as the **intake bridge** between IDSE and the Zcompiler:
+
+1. **Agent Specs**: Profiler intake (20 questions) → ProfilerDoc → AgentProfileSpec JSON → Zcompiler → Agent XML
+2. **SMART Questions / IDEA Frameworks**: (future) Framework intake → structured spec → Zcompiler → Cognitive scaffold XML
+
+Both converge at the Zcompiler's ZPrompt intermediate representation.
+
+### Boundary Contract
+- **IDSE Orchestrator** owns: intake, validation, JSON artifact production, pipeline governance
+- **Zcompiler** owns: JSON → XML transformation, hashing, versioning, scaffold selection
+- **Neither** calls LLMs — deterministic compilation throughout
+- **Runtime** (separate) executes the compiled XML against an LLM
+
+### Key Insight
+The Zcompiler doesn't just version artifacts for auditing — it **upgrades agent performance** by transforming human-authored structured data into the XML format that LLMs follow most reliably. The compilation *is* the optimization.
